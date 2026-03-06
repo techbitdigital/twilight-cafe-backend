@@ -6,12 +6,12 @@ import {
   ForeignKey,
   BelongsTo,
   HasMany,
-} from 'sequelize-typescript';
-import { Category } from './category.entity';
-import { Variation } from './variation.entity';
-import { Addon } from './addon.entity';
+} from "sequelize-typescript";
+import { Category } from "./category.entity";
+import { Variation } from "./variation.entity";
+import { Addon } from "./addon.entity";
 
-@Table({ tableName: 'menu_items', timestamps: true })
+@Table({ tableName: "menu_items", timestamps: true })
 export class MenuItem extends Model {
   @Column({
     type: DataType.UUID,
@@ -60,7 +60,7 @@ export class MenuItem extends Model {
   @Column({ type: DataType.INTEGER, defaultValue: 5 })
   declare lowStockAlert: number;
 
-  @Column({ type: DataType.ENUM('draft', 'published'), defaultValue: 'draft' })
+  @Column({ type: DataType.ENUM("draft", "published"), defaultValue: "draft" })
   declare status: string;
 
   @Column({ type: DataType.INTEGER, defaultValue: 0 })

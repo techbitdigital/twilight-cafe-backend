@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import {
   Controller,
   Get,
@@ -10,22 +11,23 @@ import {
   UseInterceptors,
   UploadedFiles,
   UseGuards,
-} from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
-import { MenuService } from './menu.service';
-import { CreateMenuItemDto } from './dto/create-menu-item.dto';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
-import { v4 as uuidv4 } from 'uuid';
+} from "@nestjs/common";
+import { FilesInterceptor } from "@nestjs/platform-express";
+import { MenuService } from "./menu.service";
+import { CreateMenuItemDto } from "./dto/create-menu-item.dto";
+import { FormDataJsonInterceptor } from "./interceptors/form-data-json.interceptor";
+import { diskStorage } from "multer";
+import { extname } from "path";
+import { v4 as uuidv4 } from "uuid";
 
 // Auth & RBAC
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../../auth/guards/roles.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
-import { Role } from '../../common/enums/role.enum';
-import { Express } from 'express';
+import { JwtAuthGuard } from "../../auth/guards/jwt-auth.guard";
+import { RolesGuard } from "../../auth/guards/roles.guard";
+import { Roles } from "../../common/decorators/roles.decorator";
+import { Role } from "../../common/enums/role.enum";
+import { Express } from "express";
 
-@Controller('api/menu')
+@Controller("api/menu")
 export class MenuController {
   constructor(private readonly menuService: MenuService) {}
 
@@ -33,25 +35,23 @@ export class MenuController {
   // PUBLIC ENDPOINTS
   // =========================
 
-  // Categories (public)
-  @Get('categories')
+  @Get("categories")
   async getAllCategories() {
     return this.menuService.getAllCategories();
   }
 
-  @Get('categories/:id')
-  async getCategory(@Param('id') id: string) {
+  @Get("categories/:id")
+  async getCategory(@Param("id") id: string) {
     return this.menuService.getCategory(id);
   }
 
-  // Menu Items (public)
-  @Get('items')
+  @Get("items")
   async getAllMenuItems(@Query() filters: any) {
     return this.menuService.getAllMenuItems(filters);
   }
 
-  @Get('items/:id')
-  async getMenuItem(@Param('id') id: string) {
+  @Get("items/:id")
+  async getMenuItem(@Param("id") id: string) {
     return this.menuService.getMenuItem(id);
   }
 
@@ -62,7 +62,7 @@ export class MenuController {
   // Categories
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  @Post('categories')
+  @Post("categories")
   async createCategory(
     @Body() body: { name: string; description?: string; icon?: string },
   ) {
@@ -73,13 +73,11 @@ export class MenuController {
     );
   }
 
-  // Add these methods to your controller
-
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  @Put('categories/:id')
+  @Put("categories/:id")
   async updateCategory(
-    @Param('id') id: string,
+    @Param("id") id: string,
     @Body() body: { name?: string; description?: string; icon?: string },
   ) {
     return this.menuService.updateCategory(
@@ -92,19 +90,20 @@ export class MenuController {
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  @Delete('categories/:id')
-  async deleteCategory(@Param('id') id: string) {
+  @Delete("categories/:id")
+  async deleteCategory(@Param("id") id: string) {
     return this.menuService.deleteCategory(id);
   }
 
   // Menu Items
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  @Post('items')
+  @Post("items")
   @UseInterceptors(
-    FilesInterceptor('images', 5, {
+    FilesInterceptor("images", 5, {
+      // 👈 multer FIRST — parses multipart body
       storage: diskStorage({
-        destination: './uploads/menu-items',
+        destination: "./uploads/menu-items",
         filename: (req, file, cb) => {
           const uniqueName = `${uuidv4()}${extname(file.originalname)}`;
           cb(null, uniqueName);
@@ -112,12 +111,13 @@ export class MenuController {
       }),
       fileFilter: (req, file, cb) => {
         if (!file.mimetype.match(/\/(jpg|jpeg|png|gif|webp)$/)) {
-          return cb(new Error('Only image files are allowed!'), false);
+          return cb(new Error("Only image files are allowed!"), false);
         }
         cb(null, true);
       },
-      limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+      limits: { fileSize: 5 * 1024 * 1024 },
     }),
+    new FormDataJsonInterceptor(), // 👈 THEN parse JSON string fields
   )
   async createMenuItem(
     @Body() createMenuItemDto: CreateMenuItemDto,
@@ -132,20 +132,29 @@ export class MenuController {
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  @Put('items/:id')
+  @Put("items/:id")
   @UseInterceptors(
-    FilesInterceptor('images', 5, {
+    FilesInterceptor("images", 5, {
+      // 👈 multer FIRST — parses multipart body
       storage: diskStorage({
-        destination: './uploads/menu-items',
+        destination: "./uploads/menu-items",
         filename: (req, file, cb) => {
           const uniqueName = `${uuidv4()}${extname(file.originalname)}`;
           cb(null, uniqueName);
         },
       }),
+      fileFilter: (req, file, cb) => {
+        if (!file.mimetype.match(/\/(jpg|jpeg|png|gif|webp)$/)) {
+          return cb(new Error("Only image files are allowed!"), false);
+        }
+        cb(null, true);
+      },
+      limits: { fileSize: 5 * 1024 * 1024 },
     }),
+    new FormDataJsonInterceptor(), // 👈 THEN parse JSON string fields
   )
   async updateMenuItem(
-    @Param('id') id: string,
+    @Param("id") id: string,
     @Body() updateData: Partial<CreateMenuItemDto>,
     @UploadedFiles() files: Express.Multer.File[],
   ) {
@@ -159,16 +168,16 @@ export class MenuController {
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  @Delete('items/:id')
-  async deleteMenuItem(@Param('id') id: string) {
+  @Delete("items/:id")
+  async deleteMenuItem(@Param("id") id: string) {
     return this.menuService.deleteMenuItem(id);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  @Put('items/:id/stock')
+  @Put("items/:id/stock")
   async updateStock(
-    @Param('id') id: string,
+    @Param("id") id: string,
     @Body() body: { quantity: number },
   ) {
     return this.menuService.updateStock(id, body.quantity);
@@ -176,7 +185,7 @@ export class MenuController {
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  @Get('items/low-stock/alert')
+  @Get("items/low-stock/alert")
   async checkLowStock() {
     return this.menuService.checkLowStock();
   }

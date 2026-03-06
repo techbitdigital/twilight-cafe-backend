@@ -1,4 +1,5 @@
-import { Transform, Type } from 'class-transformer';
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+import { Transform, Type } from "class-transformer";
 import {
   IsString,
   IsNumber,
@@ -9,9 +10,26 @@ import {
   IsEnum,
   ValidateNested,
   Min,
-} from 'class-validator';
+} from "class-validator";
 
-class VariationDto {
+/**
+ * Utility parser for multipart/form-data JSON fields
+ */
+function parseJsonArray(value: unknown) {
+  if (!value) return [];
+
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return [];
+    }
+  }
+
+  return value;
+}
+
+export class VariationDto {
   @IsString()
   name: string;
 
@@ -19,13 +37,14 @@ class VariationDto {
   @IsNumber()
   priceAdjustment: number;
 
-  // FormData sends booleans as strings
-  @Transform(({ value }) => value === 'true' || value === true)
+  @Transform(
+    ({ value }: { value: unknown }) => value === "true" || value === true,
+  )
   @IsBoolean()
   isAvailable: boolean;
 }
 
-class AddonDto {
+export class AddonDto {
   @IsString()
   name: string;
 
@@ -33,7 +52,9 @@ class AddonDto {
   @IsNumber()
   price: number;
 
-  @Transform(({ value }) => value === 'true' || value === true)
+  @Transform(
+    ({ value }: { value: unknown }) => value === "true" || value === true,
+  )
   @IsBoolean()
   isAvailable: boolean;
 }
@@ -49,7 +70,6 @@ export class CreateMenuItemDto {
   @IsUUID()
   categoryId: string;
 
-  // ✅ FormData sends numbers as strings — coerce them
   @Type(() => Number)
   @IsNumber()
   regularPrice: number;
@@ -59,8 +79,9 @@ export class CreateMenuItemDto {
   @IsNumber()
   salePrice?: number;
 
-  // ✅ FormData sends booleans as "true"/"false" strings
-  @Transform(({ value }) => value === 'true' || value === true)
+  @Transform(
+    ({ value }: { value: unknown }) => value === "true" || value === true,
+  )
   @IsBoolean()
   isAvailableForOrdering: boolean;
 
@@ -69,10 +90,12 @@ export class CreateMenuItemDto {
   @Min(0)
   preparationTime: number;
 
-  @IsEnum(['draft', 'published'])
+  @IsEnum(["draft", "published"])
   status: string;
 
-  @Transform(({ value }) => value === 'true' || value === true)
+  @Transform(
+    ({ value }: { value: unknown }) => value === "true" || value === true,
+  )
   @IsBoolean()
   trackInventory: boolean;
 
@@ -86,47 +109,31 @@ export class CreateMenuItemDto {
   @IsNumber()
   lowStockAlert?: number;
 
-  // ✅ FormData sends arrays/objects as JSON strings — parse them
+  /**
+   * Variations
+   */
   @IsOptional()
-  @Transform(({ value }) => {
-    if (!value) return [];
-    if (Array.isArray(value)) return value;
-    try {
-      return JSON.parse(value);
-    } catch {
-      return [];
-    }
-  })
+  @Transform(({ value }) => parseJsonArray(value))
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => VariationDto)
   variations?: VariationDto[];
 
+  /**
+   * Addons
+   */
   @IsOptional()
-  @Transform(({ value }) => {
-    if (!value) return [];
-    if (Array.isArray(value)) return value;
-    try {
-      return JSON.parse(value);
-    } catch {
-      return [];
-    }
-  })
+  @Transform(({ value }) => parseJsonArray(value))
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => AddonDto)
   addons?: AddonDto[];
 
+  /**
+   * Tags
+   */
   @IsOptional()
-  @Transform(({ value }) => {
-    if (!value) return [];
-    if (Array.isArray(value)) return value;
-    try {
-      return JSON.parse(value);
-    } catch {
-      return [];
-    }
-  })
+  @Transform(({ value }) => parseJsonArray(value))
   @IsArray()
   @IsString({ each: true })
   tags?: string[];

@@ -5,10 +5,10 @@ import {
   DataType,
   ForeignKey,
   BelongsTo,
-} from 'sequelize-typescript';
-import { MenuItem } from './menu-item.entity';
+} from "sequelize-typescript";
+import { MenuItem } from "./menu-item.entity";
 
-@Table({ tableName: 'variations', timestamps: true })
+@Table({ tableName: "variations", timestamps: true })
 export class Variation extends Model {
   @Column({
     type: DataType.UUID,
