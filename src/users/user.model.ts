@@ -1,12 +1,17 @@
-// users/user.model.ts
-import { Table, Column, Model, DataType, HasMany } from 'sequelize-typescript';
-import type { CreationOptional } from 'sequelize';
-import { Order } from '../modules/orders/entities/order.entity';
+import { Table, Column, Model, DataType, HasMany } from "sequelize-typescript";
+import type { CreationOptional } from "sequelize";
+import { Order } from "../modules/orders/entities/order.entity";
 
 export interface DeliveryInfo {
   streetAddress: string;
   apartmentNumber: string;
   instructions?: string;
+}
+
+export interface NotificationPrefs {
+  newOrders?: boolean;
+  lowStock?: boolean;
+  emailSummary?: boolean;
 }
 
 export interface UserAttributes {
@@ -15,12 +20,13 @@ export interface UserAttributes {
   fullName?: string;
   phone?: string;
   password?: string;
-  role?: 'customer' | 'admin';
+  role?: "customer" | "admin";
   hasPassword?: boolean;
+  notificationPrefs?: NotificationPrefs | null;
   deliveryInfo?: DeliveryInfo;
 }
 
-@Table({ tableName: 'users' })
+@Table({ tableName: "users", timestamps: true })
 export class User
   extends Model<User, UserAttributes>
   implements UserAttributes
@@ -45,11 +51,11 @@ export class User
   declare password?: string;
 
   @Column({
-    type: DataType.ENUM('customer', 'admin'),
-    defaultValue: 'customer',
+    type: DataType.ENUM("customer", "admin"),
+    defaultValue: "customer",
     allowNull: false,
   })
-  declare role: CreationOptional<'customer' | 'admin'>;
+  declare role: CreationOptional<"customer" | "admin">;
 
   @Column({
     type: DataType.BOOLEAN,
@@ -61,8 +67,16 @@ export class User
   @Column({
     type: DataType.JSON,
     allowNull: true,
+    defaultValue: null,
+  })
+  declare notificationPrefs: NotificationPrefs | null;
+
+  @Column({
+    type: DataType.JSON,
+    allowNull: true,
   })
   declare deliveryInfo?: DeliveryInfo;
+
   @HasMany(() => Order)
   declare orders?: Order[];
 }

@@ -30,6 +30,8 @@ import { HealthController } from './health.controller';
 // import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
+import { SettingsModule } from './modules/settings/settings.module';
+import {NotificationsModule} from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -59,7 +61,7 @@ import { UsersModule } from './users/users.module';
       port: Number(config.get('DB_PORT')) || 3306,
       username: config.get<string>('DB_USERNAME'),
       password: config.get<string>('DB_PASSWORD'),
-      database: config.get<string>('DB_NAME'), // ✅ FIXED
+      database: config.get<string>('DB_NAME'), 
       autoLoadModels: true,
       synchronize: true,
       logging: console.log,
@@ -92,6 +94,8 @@ import { UsersModule } from './users/users.module';
     AnalyticsModule,
     UsersModule,
     PaymentsModule,
+    SettingsModule,
+    NotificationsModule,
   ],
     controllers: [HealthController],
 

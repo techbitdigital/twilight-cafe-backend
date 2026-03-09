@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
 import {
   Controller,
   Get,
@@ -11,30 +9,28 @@ import {
   Query,
   UseGuards,
   Res,
+  HttpCode,
+  HttpStatus,
   DefaultValuePipe,
   ParseArrayPipe,
+  Logger,
 } from "@nestjs/common";
 import type { Response } from "express";
-import * as qrcodeService from "./qrcode.service";
-import type { PDFSize } from "./qrcode.service";
+import { QRCodeService } from "./qrcode.service";
+import type { PDFSize, PDFTemplate } from "./qrcode.service";
 import { JwtAuthGuard } from "../../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../../auth/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
-
 import type { CreateQRCodeInput } from "./dto/generate-qr.dto";
 import type { UpdateQRCodeInput } from "./dto/update-qrcode.dto";
 
 @Controller("api/qrcode")
 export class QRCodeController {
-  constructor(private readonly qrCodeService: qrcodeService.QRCodeService) {}
+  constructor(private readonly qrCodeService: QRCodeService) {}
 
-  // =========================
-  // ADMIN ROUTES
-  // =========================
+  // ─── Admin — CRUD ─────────────────────────────────────────────────────────
 
-  /**
-   * Generate a single QR code
-   */
+  // POST /api/qrcode
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("admin")
@@ -42,9 +38,7 @@ export class QRCodeController {
     return this.qrCodeService.generateQRCode(data);
   }
 
-  /**
-   * Generate multiple QR codes
-   */
+  // POST /api/qrcode/bulk
   @Post("bulk")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("admin")
@@ -59,67 +53,15 @@ export class QRCodeController {
     return this.qrCodeService.generateBulkQRCodes(data);
   }
 
-  @Get(":id/download/pdf")
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles("admin")
-  async downloadPDF(
-    @Param("id") id: string,
-    @Query("size") size: PDFSize = "medium",
-    @Res() res: Response,
-  ) {
-    try {
-      const pdfBuffer = await this.qrCodeService.downloadQRCodePDF(id, size);
-
-      res.set({
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="qr-${id}.pdf"`,
-        "Content-Length": pdfBuffer.length,
-      });
-
-      res.send(pdfBuffer);
-    } catch (error) {
-      res.status(400).json({
-        message: "Failed to download QR code PDF",
-        error: String(error),
-      });
-    }
-  }
-
-  /**
-   * Get all QR codes (optional filters)
-   */
+  // GET /api/qrcode
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("admin")
-  getAllQRCodes(
-    @Query("location") location?: string,
-    @Query("isActive") isActive?: string, // keep as string
-  ) {
-    // Convert string to boolean if provided
-    let active: boolean | undefined = undefined;
-    if (isActive !== undefined) {
-      active = isActive.toLowerCase() === "true";
-    }
-
-    return this.qrCodeService.getAllQRCodes({
-      location,
-      isActive: active,
-    });
+  getAllQRCodes() {
+    return this.qrCodeService.getAllQRCodes();
   }
 
-  /**
-   * Get QR codes by location
-   */
-  @Get("location/:location")
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles("admin")
-  getQRCodesByLocation(@Param("location") location: string) {
-    return this.qrCodeService.getQRCodesByLocation(location);
-  }
-
-  /**
-   * Get single QR code
-   */
+  // GET /api/qrcode/:id
   @Get(":id")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("admin")
@@ -127,9 +69,7 @@ export class QRCodeController {
     return this.qrCodeService.getQRCode(id);
   }
 
-  /**
-   * Update QR code
-   */
+  // PUT /api/qrcode/:id
   @Put(":id")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("admin")
@@ -137,93 +77,138 @@ export class QRCodeController {
     return this.qrCodeService.updateQRCode(id, data);
   }
 
-  /**
-   * Toggle QR code active status
-   */
-  @Put(":id/toggle")
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles("admin")
-  toggleQRCodeStatus(@Param("id") id: string) {
-    return this.qrCodeService.toggleQRCodeStatus(id);
-  }
-
-  /**
-   * Delete QR code
-   */
+  // DELETE /api/qrcode/:id
   @Delete(":id")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("admin")
+  @HttpCode(HttpStatus.OK)
   deleteQRCode(@Param("id") id: string) {
     return this.qrCodeService.deleteQRCode(id);
   }
 
-  // =========================
-  // PDF GENERATION
-  // =========================
-
-  /**
-   * Generate PDF for single QR code
-   */
+  // ─── Admin — PDF ──────────────────────────────────────────────────────────
+  // GET /api/qrcode/:id/pdf
   @Get(":id/pdf")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("admin")
   async generatePDF(
     @Param("id") id: string,
-    @Query("size", new DefaultValuePipe("medium")) size: qrcodeService.PDFSize,
-    @Query("template", new DefaultValuePipe("modern"))
-    template: qrcodeService.PDFTemplate,
+    @Query("size", new DefaultValuePipe("medium")) size: PDFSize,
+    @Query("template", new DefaultValuePipe("modern")) template: string,
+    @Query("name", new DefaultValuePipe("")) name: string,
+    @Query("location", new DefaultValuePipe("")) location: string,
     @Res() res: Response,
   ) {
-    const [pdfBuffer, qrCode] = await Promise.all([
-      this.qrCodeService.generatePDF(id, size, template),
-      this.qrCodeService.getQRCode(id),
-    ]);
+    try {
+      const pdfBuffer = await this.qrCodeService.downloadQRCodePDF(
+        id,
+        size,
+        name || undefined,
+        location || undefined,
+      );
 
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${qrCode.name}-qr.pdf"`,
-    );
+      const filename = encodeURIComponent(name || `qr-${id}`) + ".pdf";
 
-    return res.send(pdfBuffer);
+      res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": pdfBuffer.length,
+      });
+      return res.send(pdfBuffer);
+    } catch (error) {
+      return res.status(400).json({
+        message: "Failed to generate PDF",
+        error: String(error),
+      });
+    }
   }
 
-  /**
-   * Generate bulk PDF
-   */
+  @Get(":id/download/pdf")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("admin")
+  async downloadPDF(
+    @Param("id") id: string,
+    @Query("size", new DefaultValuePipe("medium")) size: PDFSize,
+    @Query("name", new DefaultValuePipe("")) name: string,
+    @Query("location", new DefaultValuePipe("")) location: string,
+    @Res() res: Response,
+  ) {
+    try {
+      const pdfBuffer = await this.qrCodeService.downloadQRCodePDF(
+        id,
+        size,
+        name || undefined,
+        location || undefined,
+      );
+
+      const filename = encodeURIComponent(name || `qr-${id}`) + ".pdf";
+
+      res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": pdfBuffer.length,
+      });
+      return res.send(pdfBuffer);
+    } catch (error) {
+      return res.status(400).json({
+        message: "Failed to download PDF",
+        error: String(error),
+      });
+    }
+  }
+
+  // POST /api/qrcode/pdf/bulk
   @Post("pdf/bulk")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("admin")
-  generateBulkPDFs(
+  async generateBulkPDFs(
     @Body("qrCodeIds", new ParseArrayPipe({ items: String }))
     qrCodeIds: string[],
-    @Body("size", new DefaultValuePipe("medium")) size: qrcodeService.PDFSize,
-    @Body("template", new DefaultValuePipe("modern"))
-    template: qrcodeService.PDFTemplate,
+    @Body("size", new DefaultValuePipe("medium")) size: PDFSize,
+    @Body("template", new DefaultValuePipe("modern")) template: PDFTemplate,
     @Res() res: Response,
   ) {
-    const pdfBuffer = this.qrCodeService.generateBulkPDFs(
-      qrCodeIds,
-      size,
-      template,
-    );
+    try {
+      const pdfBuffer = await this.qrCodeService.generateBulkPDFs(
+        qrCodeIds,
+        size,
+        template,
+      );
 
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader(
-      "Content-Disposition",
-      'attachment; filename="qr-codes-bulk.pdf"',
-    );
+      res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": 'attachment; filename="qr-codes-bulk.pdf"',
+        "Content-Length": pdfBuffer.length,
+      });
 
-    return res.send(pdfBuffer);
+      return res.send(pdfBuffer);
+    } catch (error) {
+      return res.status(400).json({
+        message: "Failed to generate bulk PDF",
+        error: String(error),
+      });
+    }
   }
 
-  // =========================
-  // ANALYTICS
-  // =========================
+  // ─── Admin — Analytics ────────────────────────────────────────────────────
 
-  /**
-   * QR code analytics
-   */
+  // GET /api/qrcode/analytics/overall
+  // ⚠️  Must be declared BEFORE ":id/analytics" so NestJS doesn't treat
+  //     "analytics" as an :id param
+  @Get("analytics/overall")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("admin")
+  getOverallAnalytics(
+    @Query("startDate") startDate?: string,
+    @Query("endDate") endDate?: string,
+  ) {
+    return this.qrCodeService.getOverallAnalytics(
+      startDate ? new Date(startDate) : undefined,
+      endDate ? new Date(endDate) : undefined,
+    );
+  }
+
+  // GET /api/qrcode/:id/analytics
   @Get(":id/analytics")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("admin")
@@ -239,25 +224,7 @@ export class QRCodeController {
     );
   }
 
-  /**
-   * Overall analytics
-   */
-  @Get("analytics/overall")
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles("admin")
-  getOverallAnalytics(
-    @Query("startDate") startDate?: string,
-    @Query("endDate") endDate?: string,
-  ) {
-    return this.qrCodeService.getOverallAnalytics(
-      startDate ? new Date(startDate) : undefined,
-      endDate ? new Date(endDate) : undefined,
-    );
-  }
-
-  /**
-   * Compare performance
-   */
+  // POST /api/qrcode/analytics/compare
   @Post("analytics/compare")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("admin")
@@ -268,30 +235,32 @@ export class QRCodeController {
     return this.qrCodeService.compareQRPerformance(qrCodeIds);
   }
 
-  // =========================
-  // PUBLIC ROUTES
-  // =========================
+  // ─── Public ───────────────────────────────────────────────────────────────
 
-  /**
-   * Track scan
-   */
+  // GET /api/qrcode/:id/scan  (customer scans the physical QR)
   @Get(":id/scan")
   async scanAndRedirect(@Param("id") id: string, @Res() res: Response) {
-    await this.qrCodeService.trackScan(id, {
-      userIdentifier: "anonymous",
-      deviceType: "unknown",
-    });
+    try {
+      await this.qrCodeService.trackScan(id, {
+        userIdentifier: "anonymous",
+        deviceType: "unknown",
+      });
+    } catch (error) {
+      this.logger.error(`Scan tracking failed for ${id}`, error);
+    }
 
     return res.redirect(
       "https://twilight-cafe-frontend.onrender.com/menu-list/",
     );
   }
 
-  /**
-   * Mark scan as converted
-   */
+  // PUT /api/qrcode/scan/:scanId/convert
   @Put("scan/:scanId/convert")
+  @HttpCode(HttpStatus.OK)
   markScanAsConverted(@Param("scanId") scanId: string) {
     return this.qrCodeService.markScanAsConverted(scanId);
   }
+
+  // ─── Private ──────────────────────────────────────────────────────────────
+  private readonly logger = new Logger(QRCodeController.name);
 }

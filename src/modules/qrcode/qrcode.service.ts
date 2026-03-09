@@ -1,26 +1,20 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
-/* eslint-disable @typescript-eslint/await-thenable */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  Logger,
-} from "@nestjs/common";
+import { Injectable, NotFoundException, Logger } from "@nestjs/common";
 import { InjectModel } from "@nestjs/sequelize";
-import { Op, WhereOptions } from "sequelize";
+import { Op } from "sequelize";
 import * as QRCodeLib from "qrcode";
-import { PDFDocument, PDFFont, PDFPage, StandardFonts } from "pdf-lib";
+import PDFDocument from "pdfkit";
+import sharp from "sharp";
+import { Readable } from "stream";
 import { QRCode } from "./entities/qrcode.entity";
 import { QRScan } from "./entities/qr-scan.entity";
 import type { CreateQRCodeInput } from "./dto/generate-qr.dto";
 import type { UpdateQRCodeInput } from "./dto/update-qrcode.dto";
 import type { TrackScanInput } from "./dto/track-scan.dto";
-
-/* ============================
-   TYPES
-============================ */
 
 export type PDFSize = "small" | "medium" | "large";
 export type PDFTemplate = "modern" | "elegant" | "minimal" | "vibrant";
@@ -28,50 +22,50 @@ export type PDFTemplate = "modern" | "elegant" | "minimal" | "vibrant";
 export interface QRCodeCustomization {
   color?: string;
   backgroundColor?: string;
+  style?: "standard" | "logo";
+  frameStyle?: "none" | "frame-1" | "frame-2" | "frame-3";
   logo?: string;
-  template?: PDFTemplate;
 }
 
-export interface ScanAnalytics {
+// ── Return type interfaces (stops TS4053) ─────────────────────────────────────
+
+export interface QRAnalyticsResult {
+  qrCodeId: string;
+  name: string;
   totalScans: number;
   uniqueUsers: number;
   conversions: number;
-  conversionRate: string;
-  scansByDate: Record<string, number>;
+  conversionRate: number;
+  scansByDay: Record<string, number>;
   scansByHour: Record<number, number>;
-  topDevices: Array<{ device: string; count: number }>;
+  deviceBreakdown: Record<string, number>;
 }
 
-export interface BulkQRGenerateInput {
-  tableNumbers: number[];
-  location: string;
-  customization?: QRCodeCustomization;
+export interface OverallAnalyticsResult {
+  totalScans: number;
+  uniqueUsers: number;
+  conversions: number;
+  conversionRate: number;
+  scansByHour: Record<number, number>;
 }
 
-interface TemplateConfig {
-  primaryColor: [number, number, number];
-  accentColor: [number, number, number];
-  titleSize: number;
-  subtitleSize: number;
-  showDecorations: boolean;
+export interface CompareResult {
+  qrCodeId: string;
+  name: string;
+  totalScans: number;
+  conversions: number;
+  conversionRate: number;
 }
 
-/* ============================
-   SERVICE
-============================ */
+export interface MessageResult {
+  message: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class QRCodeService {
   private readonly logger = new Logger(QRCodeService.name);
-  private readonly menuUrl = "https://twilightcafe.com.ng/menu-list";
-  private readonly cafeName = process.env.CAFE_NAME ?? "Twilight Cafe";
-
-  // ⚠️ These are placeholders for methods that need full implementation later.
-  // They are typed as `any` to avoid TS errors when called from the controller.
-  compareQRPerformance: any;
-  drawModernTemplate: any;
-  drawMinimalTemplate: any;
-  getQRCodesByLocation: any;
 
   constructor(
     @InjectModel(QRCode)
@@ -81,72 +75,106 @@ export class QRCodeService {
     private readonly qrScanModel: typeof QRScan,
   ) {}
 
-  /* ============================
-     HELPERS
-  ============================ */
-
-  private extractBase64Image(dataUrl?: string): Buffer {
-    if (!dataUrl) {
-      throw new BadRequestException("QR image not generated");
-    }
-
-    const parts = dataUrl.split(",");
-    if (parts.length !== 2) {
-      throw new BadRequestException("Invalid QR image format");
-    }
-
-    return Buffer.from(parts[1], "base64");
-  }
+  // ─── Helpers ──────────────────────────────────────────────────────────────
 
   private buildTrackingUrl(qrCodeId: string): string {
-    const apiBaseUrl = process.env.APP_URL ?? "http://localhost:5000";
-    return `${apiBaseUrl}/api/qrcode/${qrCodeId}/scan`;
+    const base =
+      process.env.APP_URL ?? "https://twilight-cafe-backend.onrender.com";
+    return `${base}/api/qrcode/${qrCodeId}/scan`;
   }
+
+  private buildDateWhere(startDate?: Date, endDate?: Date) {
+    if (!startDate && !endDate) return {};
+    const createdAt: Record<string, Date> = {};
+    if (startDate) createdAt[Op.gte as unknown as string] = startDate;
+    if (endDate) createdAt[Op.lte as unknown as string] = endDate;
+    return { createdAt };
+  }
+
+  // ─── QR Image Generation ──────────────────────────────────────────────────
 
   private async generateQRImage(
     url: string,
     customization?: QRCodeCustomization,
   ): Promise<string> {
-    return QRCodeLib.toDataURL(url, {
+    const qrBuffer = await QRCodeLib.toBuffer(url, {
       errorCorrectionLevel: "H",
-      type: "image/png",
+      type: "png",
       width: 600,
       margin: 2,
       color: {
-        dark: customization?.color ?? "#1a1a1a",
-        light: customization?.backgroundColor ?? "#FFFFFF",
+        dark: customization?.color ?? "#000000",
+        light: customization?.backgroundColor ?? "#ffffff",
       },
     });
-  }
 
-  /* ============================
-     QR GENERATION
-  ============================ */
+    let finalBuffer: Buffer = qrBuffer;
 
-  async generateQRCode(data: CreateQRCodeInput): Promise<QRCode> {
-    try {
-      if (!data.name && !data.location) {
-        throw new BadRequestException(
-          "Either name or location must be provided",
+    // Logo overlay
+    if (customization?.style === "logo" && customization?.logo) {
+      const logoBuffer = Buffer.from(
+        customization.logo.replace(/^data:image\/\w+;base64,/, ""),
+        "base64",
+      );
+      finalBuffer = await sharp(qrBuffer)
+        .composite([{ input: logoBuffer, gravity: "center" }])
+        .png()
+        .toBuffer();
+    }
+
+    // Frame overlay
+    if (customization?.frameStyle && customization.frameStyle !== "none") {
+      const framePath = `assets/frames/${customization.frameStyle}.png`;
+      try {
+        finalBuffer = await sharp(finalBuffer)
+          .composite([{ input: framePath }])
+          .png()
+          .toBuffer();
+      } catch {
+        this.logger.warn(
+          `Frame ${customization.frameStyle} not found, skipping`,
         );
       }
+    }
 
-      if (data.name) {
-        const existing = await this.qrCodeModel.findOne({
-          where: { name: data.name },
-        });
+    return `data:image/png;base64,${finalBuffer.toString("base64")}`;
+  }
 
-        if (existing) {
-          throw new BadRequestException(
-            `QR code with name "${data.name}" already exists`,
-          );
-        }
-      }
+  // ─── Create ───────────────────────────────────────────────────────────────
 
+  async generateQRCode(data: CreateQRCodeInput): Promise<QRCode> {
+    const qrCode = await this.qrCodeModel.create({
+      name: data.name ?? `Table ${Date.now()}`,
+      location: data.location ?? "Main Dining",
+      customization: data.customization ?? {},
+      url: "",
+      isActive: true,
+    });
+
+    const trackingUrl = this.buildTrackingUrl(qrCode.id);
+    const qrCodeDataUrl = await this.generateQRImage(
+      trackingUrl,
+      data.customization,
+    );
+
+    await qrCode.update({ url: trackingUrl, qrCodeDataUrl });
+    return qrCode;
+  }
+
+  // ─── Bulk Create ──────────────────────────────────────────────────────────
+
+  async generateBulkQRCodes(data: {
+    tableNumbers: number[];
+    location: string;
+    customization?: Record<string, unknown>;
+  }): Promise<QRCode[]> {
+    const results: QRCode[] = [];
+
+    for (const tableNumber of data.tableNumbers) {
       const qrCode = await this.qrCodeModel.create({
-        name: data.name ?? `Table ${Date.now()}`,
+        name: `Table ${tableNumber}`,
+        location: data.location,
         customization: data.customization ?? {},
-        location: data.location ?? "Main Dining",
         url: "",
         isActive: true,
       });
@@ -154,317 +182,143 @@ export class QRCodeService {
       const trackingUrl = this.buildTrackingUrl(qrCode.id);
       const qrCodeDataUrl = await this.generateQRImage(
         trackingUrl,
-        data.customization,
+        data.customization as QRCodeCustomization | undefined,
       );
 
       await qrCode.update({ url: trackingUrl, qrCodeDataUrl });
-
-      return qrCode;
-    } catch (error: unknown) {
-      this.logger.error(
-        "Failed to generate QR code",
-        error instanceof Error ? error.stack : String(error),
-      );
-      throw error;
+      results.push(qrCode);
     }
+
+    return results;
   }
 
-  async downloadQRCodePDF(
-    id: string,
-    size: PDFSize = "medium",
-  ): Promise<Buffer> {
-    return this.generatePDF(id, size);
-  }
-
-  async generateBulkQRCodes(input: BulkQRGenerateInput): Promise<{
-    success: QRCode[];
-    failed: Array<{ table: number; error: string }>;
-  }> {
-    const success: QRCode[] = [];
-    const failed: Array<{ table: number; error: string }> = [];
-
-    const results = await Promise.allSettled(
-      input.tableNumbers.map((tableNumber) =>
-        this.generateQRCode({
-          name: `Table ${tableNumber}`,
-          location: input.location,
-          customization: input.customization,
-        }),
-      ),
-    );
-
-    results.forEach((result, index) => {
-      if (result.status === "fulfilled") {
-        success.push(result.value);
-      } else {
-        failed.push({
-          table: input.tableNumbers[index],
-          error:
-            result.reason instanceof Error
-              ? result.reason.message
-              : "Unknown error",
-        });
-      }
-    });
-
-    return { success, failed };
-  }
-
-  /* ============================
-     FETCH
-  ============================ */
-
-  async getQRCode(id: string): Promise<QRCode> {
-    const qrCode = await this.qrCodeModel.findByPk(id);
-    if (!qrCode) throw new NotFoundException("QR code not found");
-    return qrCode;
-  }
-
-  async getAllQRCodes(filters?: {
-    location?: string;
-    isActive?: boolean;
-  }): Promise<QRCode[]> {
-    const where: WhereOptions<QRCode> = {};
-
-    if (filters?.location) where.location = filters.location;
-    if (filters?.isActive !== undefined) where.isActive = filters.isActive;
-
-    return this.qrCodeModel.findAll({
-      where,
-      order: [["createdAt", "DESC"]],
-    });
-  }
-
-  /* ============================
-     UPDATE
-  ============================ */
+  // ─── Update ───────────────────────────────────────────────────────────────
 
   async updateQRCode(id: string, data: UpdateQRCodeInput): Promise<QRCode> {
     const qrCode = await this.getQRCode(id);
-    const updateData: Partial<QRCode> = { ...data };
 
-    if (data.customization) {
-      const newQRCodeDataUrl = await this.generateQRImage(
-        qrCode.url,
-        data.customization,
-      );
+    const updatedCustomization = data.customization
+      ? { ...qrCode.customization, ...data.customization }
+      : qrCode.customization;
 
-      updateData.qrCodeDataUrl = newQRCodeDataUrl;
-      updateData.customization = {
-        ...qrCode.customization,
-        ...data.customization,
-      };
-    }
+    const qrCodeDataUrl = await this.generateQRImage(
+      qrCode.url,
+      updatedCustomization,
+    );
 
-    await qrCode.update(updateData);
+    await qrCode.update({
+      ...data,
+      customization: updatedCustomization,
+      qrCodeDataUrl,
+    });
     return qrCode;
   }
 
-  async toggleQRCodeStatus(id: string): Promise<QRCode> {
-    const qrCode = await this.getQRCode(id);
-    await qrCode.update({ isActive: !qrCode.isActive });
-    return qrCode;
+  // ─── Fetch ────────────────────────────────────────────────────────────────
+
+  async getQRCode(id: string): Promise<QRCode> {
+    const qr = await this.qrCodeModel.findByPk(id);
+    if (!qr) throw new NotFoundException("QR code not found");
+    return qr;
   }
 
-  async deleteQRCode(id: string): Promise<{ message: string }> {
-    const qrCode = await this.getQRCode(id);
-    await qrCode.destroy();
+  async getAllQRCodes(): Promise<QRCode[]> {
+    return this.qrCodeModel.findAll({ order: [["createdAt", "DESC"]] });
+  }
+
+  // ─── Delete ───────────────────────────────────────────────────────────────
+
+  async deleteQRCode(id: string): Promise<MessageResult> {
+    const qr = await this.getQRCode(id);
+    await qr.destroy();
     return { message: "QR code deleted successfully" };
   }
 
-  /* ============================
-     PDF GENERATION
-  ============================ */
+  // ─── Scan Tracking ────────────────────────────────────────────────────────
 
-  async generatePDF(
-    id: string,
-    size: PDFSize = "medium",
-    template: PDFTemplate = "modern",
-  ): Promise<Buffer> {
-    try {
-      const qrCode = await this.getQRCode(id);
-
-      const pdfDoc = await PDFDocument.create();
-      const page = pdfDoc.addPage(
-        size === "small"
-          ? [400, 500]
-          : size === "large"
-            ? [842, 1191]
-            : [595, 842],
-      );
-
-      const fonts = {
-        bold: await pdfDoc.embedFont(StandardFonts.HelveticaBold),
-        regular: await pdfDoc.embedFont(StandardFonts.Helvetica),
-        italic: await pdfDoc.embedFont(StandardFonts.HelveticaOblique),
-      };
-
-      const config = this.getTemplateConfig(template);
-
-      switch (template) {
-        case "modern":
-          await this.drawModernTemplate(page, qrCode, fonts, config);
-          break;
-        case "elegant":
-          await this.drawElegantTemplate(page, qrCode, fonts, config);
-          break;
-        case "minimal":
-          await this.drawMinimalTemplate(page, qrCode, fonts, config);
-          break;
-        case "vibrant":
-          await this.drawVibrantTemplate(page, qrCode, fonts, config);
-          break;
-      }
-
-      return Buffer.from(await pdfDoc.save());
-    } catch (error: unknown) {
-      this.logger.error(
-        "Failed to generate PDF",
-        error instanceof Error ? error.stack : String(error),
-      );
-      throw new BadRequestException("Failed to generate PDF");
-    }
-  }
-
-  // ⚠️ Needs full implementation — currently throws to prevent silent bad PDFs
-  drawVibrantTemplate(
-    _page: PDFPage,
-    _qrCode: QRCode,
-    _fonts: { bold: PDFFont; regular: PDFFont; italic: PDFFont },
-    _config: TemplateConfig,
-  ): void {
-    throw new Error("drawVibrantTemplate not yet implemented.");
-  }
-
-  // ⚠️ Needs full implementation
-  drawElegantTemplate(
-    _page: PDFPage,
-    _qrCode: QRCode,
-    _fonts: { bold: PDFFont; regular: PDFFont; italic: PDFFont },
-    _config: TemplateConfig,
-  ): void {
-    throw new Error("drawElegantTemplate not yet implemented.");
-  }
-
-  private getTemplateConfig(template: PDFTemplate): TemplateConfig {
-    const templates: Record<PDFTemplate, TemplateConfig> = {
-      modern: {
-        primaryColor: [0.1, 0.1, 0.1],
-        accentColor: [0.2, 0.4, 0.8],
-        titleSize: 32,
-        subtitleSize: 18,
-        showDecorations: true,
-      },
-      elegant: {
-        primaryColor: [0.15, 0.1, 0.05],
-        accentColor: [0.7, 0.6, 0.4],
-        titleSize: 36,
-        subtitleSize: 16,
-        showDecorations: true,
-      },
-      minimal: {
-        primaryColor: [0, 0, 0],
-        accentColor: [0.3, 0.3, 0.3],
-        titleSize: 28,
-        subtitleSize: 14,
-        showDecorations: false,
-      },
-      vibrant: {
-        primaryColor: [0.8, 0.2, 0.3],
-        accentColor: [1, 0.6, 0.2],
-        titleSize: 34,
-        subtitleSize: 20,
-        showDecorations: true,
-      },
-    };
-
-    return templates[template];
-  }
-
-  /* ============================
-     SCAN TRACKING
-  ============================ */
-
-  async trackScan(qrCodeId: string, scanData: TrackScanInput): Promise<QRScan> {
+  async trackScan(qrCodeId: string, scanData: TrackScanInput): Promise<void> {
     const qrCode = await this.getQRCode(qrCodeId);
-
-    if (!qrCode.isActive) {
-      throw new BadRequestException("This QR code is not active");
-    }
-
-    const existingScan = await this.qrScanModel.findOne({
-      where: { qrCodeId, userIdentifier: scanData.userIdentifier },
-    });
-
-    if (!existingScan) await qrCode.increment("uniqueUsers");
     await qrCode.increment("totalScans");
-
-    return this.qrScanModel.create({ qrCodeId, ...scanData });
+    await this.qrScanModel.create({ qrCodeId, ...scanData });
   }
 
-  async markScanAsConverted(scanId: string): Promise<QRScan> {
+  async markScanAsConverted(scanId: string): Promise<MessageResult> {
     const scan = await this.qrScanModel.findByPk(scanId);
     if (!scan) throw new NotFoundException("Scan not found");
-    await scan.update({ convertedToOrder: true });
-    return scan;
+    await (scan as any).update({ converted: true });
+    return { message: "Scan marked as converted" };
   }
 
-  /* ============================
-     ANALYTICS
-  ============================ */
+  // ─── Per-QR Analytics ────────────────────────────────────────────────────
 
   async getQRAnalytics(
-    qrCodeId: string,
+    id: string,
     startDate?: Date,
     endDate?: Date,
-  ): Promise<ScanAnalytics> {
-    await this.getQRCode(qrCodeId);
+  ): Promise<QRAnalyticsResult> {
+    const qrCode = await this.getQRCode(id);
+    const dateWhere = this.buildDateWhere(startDate, endDate);
 
-    const where: WhereOptions<QRScan> = { qrCodeId };
+    const scans = await this.qrScanModel.findAll({
+      where: { qrCodeId: id, ...dateWhere },
+    });
 
-    if (startDate && endDate) {
-      where.createdAt = { [Op.between]: [startDate, endDate] };
-    }
-
-    const scans = await this.qrScanModel.findAll({ where });
-
-    const totalScans = scans.length;
     const uniqueUsers = new Set(scans.map((s) => s.userIdentifier)).size;
-    const conversions = scans.filter((s) => s.convertedToOrder).length;
+    const conversions = scans.filter((s) => (s as any).converted).length;
+    const conversionRate =
+      scans.length > 0
+        ? Math.round((conversions / scans.length) * 100 * 10) / 10
+        : 0;
+
+    // Scans grouped by calendar date
+    const scansByDay: Record<string, number> = {};
+    scans.forEach((s) => {
+      const day = new Date(s.createdAt).toISOString().split("T")[0];
+      scansByDay[day] = (scansByDay[day] ?? 0) + 1;
+    });
+
+    // Scans grouped by hour-of-day
+    const scansByHour: Record<number, number> = {};
+    scans.forEach((s) => {
+      const hour = new Date(s.createdAt).getHours();
+      scansByHour[hour] = (scansByHour[hour] ?? 0) + 1;
+    });
+
+    // Device breakdown
+    const deviceBreakdown: Record<string, number> = {};
+    scans.forEach((s) => {
+      const device = (s as any).deviceType ?? "unknown";
+      deviceBreakdown[device] = (deviceBreakdown[device] ?? 0) + 1;
+    });
 
     return {
-      totalScans,
+      qrCodeId: id,
+      name: qrCode.name,
+      totalScans: scans.length,
       uniqueUsers,
       conversions,
-      conversionRate:
-        totalScans > 0 ? ((conversions / totalScans) * 100).toFixed(2) : "0.00",
-      scansByDate: {},
-      scansByHour: {},
-      topDevices: [],
+      conversionRate,
+      scansByDay,
+      scansByHour,
+      deviceBreakdown,
     };
   }
+
+  // ─── Overall Analytics ────────────────────────────────────────────────────
 
   async getOverallAnalytics(
     startDate?: Date,
     endDate?: Date,
-  ): Promise<{
-    totalScans: number;
-    uniqueUsers: number;
-    conversions: number;
-    conversionRate: string;
-    scansByHour: Record<number, number>;
-  }> {
-    const where: WhereOptions<QRScan> = {};
+  ): Promise<OverallAnalyticsResult> {
+    const dateWhere = this.buildDateWhere(startDate, endDate);
+    const scans = await this.qrScanModel.findAll({ where: { ...dateWhere } });
 
-    if (startDate && endDate) {
-      where.createdAt = { [Op.between]: [startDate, endDate] };
-    }
-
-    const scans = await this.qrScanModel.findAll({ where });
-
-    const totalScans = scans.length;
     const uniqueUsers = new Set(scans.map((s) => s.userIdentifier)).size;
-    const conversions = scans.filter((s) => s.convertedToOrder).length;
+    const conversions = scans.filter((s) => (s as any).converted).length;
+    const conversionRate =
+      scans.length > 0
+        ? Math.round((conversions / scans.length) * 100 * 10) / 10
+        : 0;
 
     const scansByHour: Record<number, number> = {};
     scans.forEach((s) => {
@@ -473,36 +327,217 @@ export class QRCodeService {
     });
 
     return {
-      totalScans,
+      totalScans: scans.length,
       uniqueUsers,
       conversions,
-      conversionRate:
-        totalScans > 0 ? ((conversions / totalScans) * 100).toFixed(2) : "0.00",
+      conversionRate,
       scansByHour,
     };
   }
 
-  async generateBulkPDFs(
-    qrCodeIds: string[],
-    size: PDFSize = "medium",
-    template: PDFTemplate = "modern",
-  ): Promise<Buffer> {
-    const pdfDoc = await PDFDocument.create();
+  // ─── Compare QR Performance ───────────────────────────────────────────────
+
+  async compareQRPerformance(qrCodeIds: string[]): Promise<CompareResult[]> {
+    const results: CompareResult[] = [];
 
     for (const id of qrCodeIds) {
-      try {
-        const singleBuffer = await this.generatePDF(id, size, template);
-        const singleDoc = await PDFDocument.load(singleBuffer);
-        const pages = await pdfDoc.copyPages(
-          singleDoc,
-          singleDoc.getPageIndices(),
+      const qrCode = await this.getQRCode(id);
+      const scans = await this.qrScanModel.findAll({ where: { qrCodeId: id } });
+
+      const conversions = scans.filter((s) => (s as any).converted).length;
+      const conversionRate =
+        scans.length > 0
+          ? Math.round((conversions / scans.length) * 100 * 10) / 10
+          : 0;
+
+      results.push({
+        qrCodeId: id,
+        name: qrCode.name,
+        totalScans: scans.length,
+        conversions,
+        conversionRate,
+      });
+    }
+
+    // Sort by totalScans descending
+    return results.sort((a, b) => b.totalScans - a.totalScans);
+  }
+
+  // ─── PDF Download ─────────────────────────────────────────────────────────
+  // Returns the raw base64 QR image as a simple downloadable buffer.
+  // Replace with a real PDF library (pdf-lib / puppeteer) when needed.
+
+  // Install if not already present: npm install sharp
+  // sharp is already in your dependencies from QR image generation
+
+  // Helper: collect a Node stream into a Buffer
+  private streamToBuffer(stream: Readable): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      stream.on("data", (chunk) =>
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)),
+      );
+      stream.on("end", () => resolve(Buffer.concat(chunks)));
+      stream.on("error", reject);
+    });
+  }
+
+  async downloadQRCodePDF(
+    id: string,
+    size: PDFSize = "medium",
+    name?: string,
+    location?: string,
+  ): Promise<Buffer> {
+    const qrCode = await this.getQRCode(id);
+
+    if (!qrCode.qrCodeDataUrl) {
+      throw new NotFoundException(
+        "QR image not generated yet. Please generate the QR code first.",
+      );
+    }
+
+    // ── Page dimensions ───────────────────────────────────────────────────
+    const SIZE_MAP: Record<PDFSize, { width: number; height: number }> = {
+      small: { width: 283, height: 340 }, // ~100mm × 120mm (table tent)
+      medium: { width: 595, height: 842 }, // A4
+      large: { width: 842, height: 1191 }, // A3
+    };
+
+    const { width, height } = SIZE_MAP[size] ?? SIZE_MAP.medium;
+
+    // ── Decode base64 QR image ────────────────────────────────────────────
+    const base64Data = qrCode.qrCodeDataUrl.replace(
+      /^data:image\/\w+;base64,/,
+      "",
+    );
+    const qrBuffer = Buffer.from(base64Data, "base64");
+
+    // ── Resize QR to 70% of page width ───────────────────────────────────
+    const qrSize = Math.round(width * 0.7);
+    const resizedQR = await sharp(qrBuffer)
+      .resize(qrSize, qrSize)
+      .png()
+      .toBuffer();
+
+    // ── Build PDF ─────────────────────────────────────────────────────────
+    const doc = new PDFDocument({
+      size: [width, height],
+      margins: { top: 0, bottom: 0, left: 0, right: 0 },
+      info: {
+        Title: name ?? qrCode.name ?? "QR Code",
+        Subject: "QR Code — Twilight Cafe",
+      },
+    });
+
+    const xCenter = width / 2;
+    const qrX = (width - qrSize) / 2;
+
+    // White background
+    doc.rect(0, 0, width, height).fill("#ffffff");
+
+    // "SCAN TO ORDER" label — top
+    const topLabelY = size === "small" ? 22 : 40;
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(size === "small" ? 8 : 11)
+      .fillColor("#C4704F")
+      .text("SCAN TO ORDER", 0, topLabelY, {
+        width,
+        align: "center",
+        characterSpacing: 2,
+      });
+
+    // QR image — centred vertically with room for labels
+    const labelSpace = name || location ? (size === "small" ? 55 : 80) : 20;
+    const qrY = (height - qrSize - labelSpace) / 2;
+
+    doc.image(resizedQR, qrX, qrY, { width: qrSize, height: qrSize });
+
+    // Decorative border around QR
+    doc
+      .rect(qrX - 4, qrY - 4, qrSize + 8, qrSize + 8)
+      .lineWidth(0.5)
+      .strokeColor("#F1E4DE")
+      .stroke();
+
+    // Name
+    const displayName = name || qrCode.name;
+    if (displayName) {
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(size === "small" ? 11 : 16)
+        .fillColor("#1f2937")
+        .text(displayName, 0, qrY + qrSize + (size === "small" ? 12 : 20), {
+          width,
+          align: "center",
+        });
+    }
+
+    // Location
+    const displayLocation = location || qrCode.location;
+    if (displayLocation) {
+      doc
+        .font("Helvetica")
+        .fontSize(size === "small" ? 8 : 11)
+        .fillColor("#6b7280")
+        .text(displayLocation, 0, qrY + qrSize + (size === "small" ? 28 : 44), {
+          width,
+          align: "center",
+        });
+    }
+
+    // Subtle footer
+    doc
+      .font("Helvetica")
+      .fontSize(size === "small" ? 6 : 8)
+      .fillColor("#d1d5db")
+      .text(
+        "Powered by Twilight Cafe",
+        0,
+        height - (size === "small" ? 14 : 20),
+        {
+          width,
+          align: "center",
+        },
+      );
+
+    doc.end();
+
+    return this.streamToBuffer(doc as unknown as Readable);
+  }
+
+  // ── XML escape helper ──────────────────────────────────────────────────────
+  private escapeXml(str: string): string {
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;");
+  }
+
+  // ─── Bulk PDF ─────────────────────────────────────────────────────────────
+
+  async generateBulkPDFs(
+    qrCodeIds: string[],
+    _size: PDFSize = "medium",
+    _template: PDFTemplate = "modern",
+  ): Promise<Buffer> {
+    // Concatenates raw PNG buffers as a placeholder.
+    // Swap for pdf-lib multi-page PDF when you add the dependency.
+    const buffers: Buffer[] = [];
+
+    for (const id of qrCodeIds) {
+      const qrCode = await this.getQRCode(id);
+      if (qrCode.qrCodeDataUrl) {
+        const buf = Buffer.from(
+          qrCode.qrCodeDataUrl.replace(/^data:image\/png;base64,/, ""),
+          "base64",
         );
-        pages.forEach((p) => pdfDoc.addPage(p));
-      } catch (error) {
-        this.logger.warn(`Skipping QR ${id} in bulk PDF — ${String(error)}`);
+        buffers.push(buf);
       }
     }
 
-    return Buffer.from(await pdfDoc.save());
+    return Buffer.concat(buffers);
   }
 }
