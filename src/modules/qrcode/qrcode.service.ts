@@ -99,8 +99,7 @@ export class QRCodeService {
   }
 
   private buildTrackingUrl(qrCodeId: string): string {
-    const apiBaseUrl =
-      process.env.APP_URL ?? "https://backend.twilightcafe.com.ng";
+    const apiBaseUrl = process.env.APP_URL ?? "http://localhost:5000";
     return `${apiBaseUrl}/api/qrcode/${qrCodeId}/scan`;
   }
 
