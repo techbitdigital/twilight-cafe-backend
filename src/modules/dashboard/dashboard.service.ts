@@ -12,7 +12,7 @@ import { OrderItem } from '../orders/entities/order-item.entity';
 import { MenuItem } from '../menu/entities/menu-item.entity';
 import { QRCode } from '../qrcode/entities/qrcode.entity';
 import { QRScan } from '../qrcode/entities/qr-scan.entity';
-import { Op, fn, col, Sequelize } from 'sequelize'; // ⭐ Fixed import
+import { Op, fn, col, Sequelize } from 'sequelize'; 
 
 export enum OrderStatus {
   PENDING_PAYMENT = 'pending_payment',
@@ -23,7 +23,6 @@ export enum OrderStatus {
   CANCELLED = 'cancelled',
 }
 
-// ⭐ Export these interfaces
 export interface DashboardStats {
   ordersToday: number;
   revenueToday: number;

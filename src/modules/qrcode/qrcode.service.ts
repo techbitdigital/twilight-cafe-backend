@@ -1,28 +1,29 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/await-thenable */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import {
   Injectable,
   NotFoundException,
   BadRequestException,
   Logger,
-} from '@nestjs/common';
-import { InjectModel } from '@nestjs/sequelize';
-import { Op, WhereOptions } from 'sequelize';
-import * as QRCodeLib from 'qrcode';
-import { PDFDocument, PDFFont, PDFPage, StandardFonts } from 'pdf-lib';
-import { QRCode } from './entities/qrcode.entity';
-import { QRScan } from './entities/qr-scan.entity';
-import type { CreateQRCodeInput } from './dto/generate-qr.dto';
-import type { UpdateQRCodeInput } from './dto/update-qrcode.dto';
-import type { TrackScanInput } from './dto/track-scan.dto';
+} from "@nestjs/common";
+import { InjectModel } from "@nestjs/sequelize";
+import { Op, WhereOptions } from "sequelize";
+import * as QRCodeLib from "qrcode";
+import { PDFDocument, PDFFont, PDFPage, StandardFonts } from "pdf-lib";
+import { QRCode } from "./entities/qrcode.entity";
+import { QRScan } from "./entities/qr-scan.entity";
+import type { CreateQRCodeInput } from "./dto/generate-qr.dto";
+import type { UpdateQRCodeInput } from "./dto/update-qrcode.dto";
+import type { TrackScanInput } from "./dto/track-scan.dto";
 
 /* ============================
    TYPES
 ============================ */
 
-export type PDFSize = 'small' | 'medium' | 'large';
-export type PDFTemplate = 'modern' | 'elegant' | 'minimal' | 'vibrant';
+export type PDFSize = "small" | "medium" | "large";
+export type PDFTemplate = "modern" | "elegant" | "minimal" | "vibrant";
 
 export interface QRCodeCustomization {
   color?: string;
@@ -61,18 +62,12 @@ interface TemplateConfig {
 
 @Injectable()
 export class QRCodeService {
-  generateBulkPDFs(qrCodeIds: string[], size: string, template: string) {
-    throw new Error('Method not implemented.');
-  }
-  getOverallAnalytics(arg0: Date | undefined, arg1: Date | undefined) {
-    throw new Error('Method not implemented.');
-  }
-  markScanAsConverted(scanId: string) {
-    throw new Error('Method not implemented.');
-  }
   private readonly logger = new Logger(QRCodeService.name);
-  private readonly menuUrl = 'https://twilightcafe.com.ng/menu-list';
-  private readonly cafeName = process.env.CAFE_NAME ?? 'Twilight Cafe';
+  private readonly menuUrl = "https://twilightcafe.com.ng/menu-list";
+  private readonly cafeName = process.env.CAFE_NAME ?? "Twilight Cafe";
+
+  // ⚠️ These are placeholders for methods that need full implementation later.
+  // They are typed as `any` to avoid TS errors when called from the controller.
   compareQRPerformance: any;
   drawModernTemplate: any;
   drawMinimalTemplate: any;
@@ -92,22 +87,20 @@ export class QRCodeService {
 
   private extractBase64Image(dataUrl?: string): Buffer {
     if (!dataUrl) {
-      throw new BadRequestException('QR image not generated');
+      throw new BadRequestException("QR image not generated");
     }
 
-    const parts = dataUrl.split(',');
+    const parts = dataUrl.split(",");
     if (parts.length !== 2) {
-      throw new BadRequestException('Invalid QR image format');
+      throw new BadRequestException("Invalid QR image format");
     }
 
-    return Buffer.from(parts[1], 'base64');
+    return Buffer.from(parts[1], "base64");
   }
 
   private buildTrackingUrl(qrCodeId: string): string {
     const apiBaseUrl =
-      process.env.APP_URL ?? 'https://backend.twilightcafe.com.ng';
-
-    // QR now points to backend, not frontend
+      process.env.APP_URL ?? "https://backend.twilightcafe.com.ng";
     return `${apiBaseUrl}/api/qrcode/${qrCodeId}/scan`;
   }
 
@@ -116,13 +109,13 @@ export class QRCodeService {
     customization?: QRCodeCustomization,
   ): Promise<string> {
     return QRCodeLib.toDataURL(url, {
-      errorCorrectionLevel: 'H',
-      type: 'image/png',
+      errorCorrectionLevel: "H",
+      type: "image/png",
       width: 600,
       margin: 2,
       color: {
-        dark: customization?.color ?? '#1a1a1a',
-        light: customization?.backgroundColor ?? '#FFFFFF',
+        dark: customization?.color ?? "#1a1a1a",
+        light: customization?.backgroundColor ?? "#FFFFFF",
       },
     });
   }
@@ -135,7 +128,7 @@ export class QRCodeService {
     try {
       if (!data.name && !data.location) {
         throw new BadRequestException(
-          'Either name or location must be provided',
+          "Either name or location must be provided",
         );
       }
 
@@ -154,8 +147,8 @@ export class QRCodeService {
       const qrCode = await this.qrCodeModel.create({
         name: data.name ?? `Table ${Date.now()}`,
         customization: data.customization ?? {},
-        location: data.location ?? 'Main Dining',
-        url: '',
+        location: data.location ?? "Main Dining",
+        url: "",
         isActive: true,
       });
 
@@ -165,15 +158,12 @@ export class QRCodeService {
         data.customization,
       );
 
-      await qrCode.update({
-        url: trackingUrl,
-        qrCodeDataUrl,
-      });
+      await qrCode.update({ url: trackingUrl, qrCodeDataUrl });
 
       return qrCode;
     } catch (error: unknown) {
       this.logger.error(
-        'Failed to generate QR code',
+        "Failed to generate QR code",
         error instanceof Error ? error.stack : String(error),
       );
       throw error;
@@ -182,9 +172,8 @@ export class QRCodeService {
 
   async downloadQRCodePDF(
     id: string,
-    size: PDFSize = 'medium',
+    size: PDFSize = "medium",
   ): Promise<Buffer> {
-    // Calls your existing generatePDF method
     return this.generatePDF(id, size);
   }
 
@@ -206,17 +195,15 @@ export class QRCodeService {
     );
 
     results.forEach((result, index) => {
-      if (result.status === 'fulfilled') {
+      if (result.status === "fulfilled") {
         success.push(result.value);
       } else {
-        const message =
-          result.reason instanceof Error
-            ? result.reason.message
-            : 'Unknown error';
-
         failed.push({
           table: input.tableNumbers[index],
-          error: message,
+          error:
+            result.reason instanceof Error
+              ? result.reason.message
+              : "Unknown error",
         });
       }
     });
@@ -230,7 +217,7 @@ export class QRCodeService {
 
   async getQRCode(id: string): Promise<QRCode> {
     const qrCode = await this.qrCodeModel.findByPk(id);
-    if (!qrCode) throw new NotFoundException('QR code not found');
+    if (!qrCode) throw new NotFoundException("QR code not found");
     return qrCode;
   }
 
@@ -245,7 +232,7 @@ export class QRCodeService {
 
     return this.qrCodeModel.findAll({
       where,
-      order: [['createdAt', 'DESC']],
+      order: [["createdAt", "DESC"]],
     });
   }
 
@@ -283,7 +270,7 @@ export class QRCodeService {
   async deleteQRCode(id: string): Promise<{ message: string }> {
     const qrCode = await this.getQRCode(id);
     await qrCode.destroy();
-    return { message: 'QR code deleted successfully' };
+    return { message: "QR code deleted successfully" };
   }
 
   /* ============================
@@ -292,17 +279,17 @@ export class QRCodeService {
 
   async generatePDF(
     id: string,
-    size: PDFSize = 'medium',
-    template: PDFTemplate = 'modern',
+    size: PDFSize = "medium",
+    template: PDFTemplate = "modern",
   ): Promise<Buffer> {
     try {
       const qrCode = await this.getQRCode(id);
 
       const pdfDoc = await PDFDocument.create();
       const page = pdfDoc.addPage(
-        size === 'small'
+        size === "small"
           ? [400, 500]
-          : size === 'large'
+          : size === "large"
             ? [842, 1191]
             : [595, 842],
       );
@@ -316,16 +303,16 @@ export class QRCodeService {
       const config = this.getTemplateConfig(template);
 
       switch (template) {
-        case 'modern':
+        case "modern":
           await this.drawModernTemplate(page, qrCode, fonts, config);
           break;
-        case 'elegant':
+        case "elegant":
           await this.drawElegantTemplate(page, qrCode, fonts, config);
           break;
-        case 'minimal':
+        case "minimal":
           await this.drawMinimalTemplate(page, qrCode, fonts, config);
           break;
-        case 'vibrant':
+        case "vibrant":
           await this.drawVibrantTemplate(page, qrCode, fonts, config);
           break;
       }
@@ -333,55 +320,59 @@ export class QRCodeService {
       return Buffer.from(await pdfDoc.save());
     } catch (error: unknown) {
       this.logger.error(
-        'Failed to generate PDF',
+        "Failed to generate PDF",
         error instanceof Error ? error.stack : String(error),
       );
-      throw new BadRequestException('Failed to generate PDF');
+      throw new BadRequestException("Failed to generate PDF");
     }
   }
+
+  // ⚠️ Needs full implementation — currently throws to prevent silent bad PDFs
   drawVibrantTemplate(
-    page: PDFPage,
-    qrCode: QRCode,
-    fonts: { bold: PDFFont; regular: PDFFont; italic: PDFFont },
-    config: TemplateConfig,
-  ) {
-    throw new Error('Method not implemented.');
+    _page: PDFPage,
+    _qrCode: QRCode,
+    _fonts: { bold: PDFFont; regular: PDFFont; italic: PDFFont },
+    _config: TemplateConfig,
+  ): void {
+    throw new Error("drawVibrantTemplate not yet implemented.");
   }
+
+  // ⚠️ Needs full implementation
   drawElegantTemplate(
-    page: PDFPage,
-    qrCode: QRCode,
-    fonts: { bold: PDFFont; regular: PDFFont; italic: PDFFont },
-    config: TemplateConfig,
-  ) {
-    throw new Error('Method not implemented.');
+    _page: PDFPage,
+    _qrCode: QRCode,
+    _fonts: { bold: PDFFont; regular: PDFFont; italic: PDFFont },
+    _config: TemplateConfig,
+  ): void {
+    throw new Error("drawElegantTemplate not yet implemented.");
   }
 
   private getTemplateConfig(template: PDFTemplate): TemplateConfig {
-    const templates = {
+    const templates: Record<PDFTemplate, TemplateConfig> = {
       modern: {
-        primaryColor: [0.1, 0.1, 0.1] as [number, number, number],
-        accentColor: [0.2, 0.4, 0.8] as [number, number, number],
+        primaryColor: [0.1, 0.1, 0.1],
+        accentColor: [0.2, 0.4, 0.8],
         titleSize: 32,
         subtitleSize: 18,
         showDecorations: true,
       },
       elegant: {
-        primaryColor: [0.15, 0.1, 0.05] as [number, number, number],
-        accentColor: [0.7, 0.6, 0.4] as [number, number, number],
+        primaryColor: [0.15, 0.1, 0.05],
+        accentColor: [0.7, 0.6, 0.4],
         titleSize: 36,
         subtitleSize: 16,
         showDecorations: true,
       },
       minimal: {
-        primaryColor: [0, 0, 0] as [number, number, number],
-        accentColor: [0.3, 0.3, 0.3] as [number, number, number],
+        primaryColor: [0, 0, 0],
+        accentColor: [0.3, 0.3, 0.3],
         titleSize: 28,
         subtitleSize: 14,
         showDecorations: false,
       },
       vibrant: {
-        primaryColor: [0.8, 0.2, 0.3] as [number, number, number],
-        accentColor: [1, 0.6, 0.2] as [number, number, number],
+        primaryColor: [0.8, 0.2, 0.3],
+        accentColor: [1, 0.6, 0.2],
         titleSize: 34,
         subtitleSize: 20,
         showDecorations: true,
@@ -399,23 +390,24 @@ export class QRCodeService {
     const qrCode = await this.getQRCode(qrCodeId);
 
     if (!qrCode.isActive) {
-      throw new BadRequestException('This QR code is not active');
+      throw new BadRequestException("This QR code is not active");
     }
 
     const existingScan = await this.qrScanModel.findOne({
-      where: {
-        qrCodeId,
-        userIdentifier: scanData.userIdentifier,
-      },
+      where: { qrCodeId, userIdentifier: scanData.userIdentifier },
     });
 
-    if (!existingScan) await qrCode.increment('uniqueUsers');
-    await qrCode.increment('totalScans');
+    if (!existingScan) await qrCode.increment("uniqueUsers");
+    await qrCode.increment("totalScans");
 
-    return this.qrScanModel.create({
-      qrCodeId,
-      ...scanData,
-    });
+    return this.qrScanModel.create({ qrCodeId, ...scanData });
+  }
+
+  async markScanAsConverted(scanId: string): Promise<QRScan> {
+    const scan = await this.qrScanModel.findByPk(scanId);
+    if (!scan) throw new NotFoundException("Scan not found");
+    await scan.update({ convertedToOrder: true });
+    return scan;
   }
 
   /* ============================
@@ -446,10 +438,72 @@ export class QRCodeService {
       uniqueUsers,
       conversions,
       conversionRate:
-        totalScans > 0 ? ((conversions / totalScans) * 100).toFixed(2) : '0.00',
+        totalScans > 0 ? ((conversions / totalScans) * 100).toFixed(2) : "0.00",
       scansByDate: {},
       scansByHour: {},
       topDevices: [],
     };
+  }
+
+  async getOverallAnalytics(
+    startDate?: Date,
+    endDate?: Date,
+  ): Promise<{
+    totalScans: number;
+    uniqueUsers: number;
+    conversions: number;
+    conversionRate: string;
+    scansByHour: Record<number, number>;
+  }> {
+    const where: WhereOptions<QRScan> = {};
+
+    if (startDate && endDate) {
+      where.createdAt = { [Op.between]: [startDate, endDate] };
+    }
+
+    const scans = await this.qrScanModel.findAll({ where });
+
+    const totalScans = scans.length;
+    const uniqueUsers = new Set(scans.map((s) => s.userIdentifier)).size;
+    const conversions = scans.filter((s) => s.convertedToOrder).length;
+
+    const scansByHour: Record<number, number> = {};
+    scans.forEach((s) => {
+      const hour = new Date(s.createdAt).getHours();
+      scansByHour[hour] = (scansByHour[hour] ?? 0) + 1;
+    });
+
+    return {
+      totalScans,
+      uniqueUsers,
+      conversions,
+      conversionRate:
+        totalScans > 0 ? ((conversions / totalScans) * 100).toFixed(2) : "0.00",
+      scansByHour,
+    };
+  }
+
+  async generateBulkPDFs(
+    qrCodeIds: string[],
+    size: PDFSize = "medium",
+    template: PDFTemplate = "modern",
+  ): Promise<Buffer> {
+    const pdfDoc = await PDFDocument.create();
+
+    for (const id of qrCodeIds) {
+      try {
+        const singleBuffer = await this.generatePDF(id, size, template);
+        const singleDoc = await PDFDocument.load(singleBuffer);
+        const pages = await pdfDoc.copyPages(
+          singleDoc,
+          singleDoc.getPageIndices(),
+        );
+        pages.forEach((p) => pdfDoc.addPage(p));
+      } catch (error) {
+        this.logger.warn(`Skipping QR ${id} in bulk PDF — ${String(error)}`);
+      }
+    }
+
+    return Buffer.from(await pdfDoc.save());
   }
 }
