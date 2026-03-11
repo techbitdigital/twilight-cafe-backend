@@ -1,5 +1,6 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
-import axios from 'axios';
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+import { Injectable, BadRequestException } from "@nestjs/common";
+import axios from "axios";
 
 @Injectable()
 export class PaystackService {
@@ -18,7 +19,7 @@ export class PaystackService {
 
       return response.data;
     } catch (error) {
-      throw new BadRequestException('Payment verification failed');
+      throw new BadRequestException("Payment verification failed");
     }
   }
 }

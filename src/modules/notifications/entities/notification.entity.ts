@@ -5,6 +5,8 @@ import {
   DataType,
   ForeignKey,
   BelongsTo,
+  CreatedAt,
+  UpdatedAt,
 } from "sequelize-typescript";
 import { User } from "../../../users/user.model";
 
@@ -40,6 +42,14 @@ export class Notification extends Model {
 
   @Column({ type: DataType.JSON, allowNull: true })
   declare meta: Record<string, unknown> | null;
+
+  // ✅ FIX: Explicitly declare timestamps so TypeScript knows about them
+  // Without these, toResult() in the service would throw a TS error on n.createdAt
+  @CreatedAt
+  declare createdAt: Date;
+
+  @UpdatedAt
+  declare updatedAt: Date;
 
   @BelongsTo(() => User)
   declare user: User;

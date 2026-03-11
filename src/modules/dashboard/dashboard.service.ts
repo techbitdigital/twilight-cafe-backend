@@ -5,22 +5,22 @@ import {
   Injectable,
   Logger,
   InternalServerErrorException,
-} from '@nestjs/common';
-import { InjectModel } from '@nestjs/sequelize';
-import { Order } from '../orders/entities/order.entity';
-import { OrderItem } from '../orders/entities/order-item.entity';
-import { MenuItem } from '../menu/entities/menu-item.entity';
-import { QRCode } from '../qrcode/entities/qrcode.entity';
-import { QRScan } from '../qrcode/entities/qr-scan.entity';
-import { Op, fn, col, Sequelize } from 'sequelize'; 
+} from "@nestjs/common";
+import { InjectModel } from "@nestjs/sequelize";
+import { Order } from "../orders/entities/order.entity";
+import { OrderItem } from "../orders/entities/order-item.entity";
+import { MenuItem } from "../menu/entities/menu-item.entity";
+import { QRCode } from "../qrcode/entities/qrcode.entity";
+import { QRScan } from "../qrcode/entities/qr-scan.entity";
+import { Op, fn, col, Sequelize } from "sequelize";
 
 export enum OrderStatus {
-  PENDING_PAYMENT = 'pending_payment',
-  PAID = 'paid',
-  PREPARING = 'preparing',
-  READY = 'ready',
-  COMPLETED = 'completed',
-  CANCELLED = 'cancelled',
+  PENDING_PAYMENT = "pending_payment",
+  PAID = "paid",
+  PREPARING = "preparing",
+  READY = "ready",
+  COMPLETED = "completed",
+  CANCELLED = "cancelled",
 }
 
 export interface DashboardStats {
@@ -46,7 +46,7 @@ export interface TopSellingItem extends TopSellingItemAggregate {
 }
 
 export interface SystemStatus {
-  whatsappConnection: 'Active' | 'Inactive';
+  whatsappConnection: "Active" | "Inactive";
   lastMenuSync: Date | null;
   qrScansToday: number;
   activeOrders: number;
@@ -64,9 +64,6 @@ export interface OrderBreakdown {
   totalValue: number;
 }
 
-/**
- * Status groups for different calculations
- */
 const REVENUE_STATUSES = [
   OrderStatus.PAID,
   OrderStatus.PREPARING,
@@ -80,9 +77,6 @@ const ACTIVE_STATUSES = [
   OrderStatus.READY,
 ];
 
-/**
- * Dashboard service - Provides analytics and statistics
- */
 @Injectable()
 export class DashboardService {
   private readonly logger = new Logger(DashboardService.name);
@@ -104,18 +98,12 @@ export class DashboardService {
     private readonly qrScanModel: typeof QRScan,
   ) {}
 
-  /**
-   * Get today's date at midnight (for consistent daily queries)
-   */
   private getTodayStart(): Date {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     return today;
   }
 
-  /**
-   * Safely convert Sequelize aggregate result to number
-   */
   private toNumber(value: unknown, fallback = 0): number {
     if (value === null || value === undefined) return fallback;
     const num = Number(value);
@@ -125,10 +113,8 @@ export class DashboardService {
   // -------------------------------
   // DASHBOARD STATS
   // -------------------------------
-  /**
-   * Get comprehensive dashboard statistics for today
-   * Includes orders, revenue, menu items, and averages
-   */
+  // ✅ userId param removed — this is an admin dashboard; orders belong to
+  //    customers, not the admin. Filtering by admin's userId returned 0 always.
   async getDashboardStats(): Promise<DashboardStats> {
     try {
       const today = this.getTodayStart();
@@ -141,35 +127,37 @@ export class DashboardService {
         pendingOrders,
         activeOrders,
       ] = await Promise.all([
-        // Total orders created today
+        // ✅ All orders today across all customers
         this.orderModel.count({
-          where: { createdAt: { [Op.gte]: today } },
+          where: {
+            createdAt: { [Op.gte]: today },
+          },
         }),
 
-        // Revenue from paid/completed orders today
-        this.orderModel.sum('total', {
+        // ✅ Revenue across all customers today
+        this.orderModel.sum("total", {
           where: {
             createdAt: { [Op.gte]: today },
             status: { [Op.in]: REVENUE_STATUSES },
           },
         }),
 
-        // Published menu items
+        // All published menu items (no userId — MenuItem has no userId column)
         this.menuItemModel.count({
-          where: { status: 'published' },
+          where: { status: "published" },
         }),
 
-        // Completed orders for average calculation
+        // ✅ All completed orders today across all customers
         this.orderModel.findAll({
           where: {
             createdAt: { [Op.gte]: today },
             status: OrderStatus.COMPLETED,
           },
-          attributes: ['total'],
+          attributes: ["total"],
           raw: true,
         }),
 
-        // Orders waiting for payment
+        // ✅ All pending payment orders today
         this.orderModel.count({
           where: {
             status: OrderStatus.PENDING_PAYMENT,
@@ -177,7 +165,7 @@ export class DashboardService {
           },
         }),
 
-        // Orders currently being processed
+        // ✅ All active orders today
         this.orderModel.count({
           where: {
             status: { [Op.in]: ACTIVE_STATUSES },
@@ -186,10 +174,8 @@ export class DashboardService {
         }),
       ]);
 
-      // Safe revenue calculation
       const revenueToday = this.toNumber(rawRevenueToday);
 
-      // Calculate average order value from completed orders
       const avgOrderValue =
         completedOrdersToday.length > 0
           ? completedOrdersToday.reduce(
@@ -207,12 +193,12 @@ export class DashboardService {
         activeOrders,
       };
 
-      this.logger.log(`Dashboard stats calculated: ${JSON.stringify(stats)}`);
+      this.logger.log(`Dashboard stats: ${JSON.stringify(stats)}`);
       return stats;
     } catch (error) {
-      this.logger.error('Failed to get dashboard stats', error);
+      this.logger.error("Failed to get dashboard stats", error);
       throw new InternalServerErrorException(
-        'Failed to retrieve dashboard statistics',
+        "Failed to retrieve dashboard statistics",
       );
     }
   }
@@ -220,41 +206,36 @@ export class DashboardService {
   // -------------------------------
   // TOP SELLING ITEMS
   // -------------------------------
-  /**
-   * Get top selling menu items based on total quantity sold
-   * @param limit - Number of items to return (default: 5)
-   * @param timeframe - Optional timeframe ('today', 'week', 'month', 'all')
-   */
+  // ✅ userId param removed — aggregate across ALL customer orders
   async getTopSellingItems(
     limit = 5,
-    timeframe: 'today' | 'week' | 'month' | 'all' = 'all',
+    timeframe: "today" | "week" | "month" | "all" = "all",
   ): Promise<TopSellingItem[]> {
     try {
-      // Calculate date range based on timeframe
       const dateFilter = this.getDateFilter(timeframe);
 
       const rawItems = (await this.orderItemModel.findAll({
         attributes: [
-          'menuItemId',
-          'itemName',
-          [fn('SUM', col('quantity')), 'totalQuantity'],
-          // ⭐ FIX: Use Sequelize.literal for multiplication
-          [Sequelize.literal('SUM(quantity * price)'), 'totalRevenue'],
-          [fn('AVG', col('price')), 'avgPrice'],
+          "menuItemId",
+          "itemName",
+          [fn("SUM", col("quantity")), "totalQuantity"],
+          [Sequelize.literal("SUM(quantity * price)"), "totalRevenue"],
+          [fn("AVG", col("price")), "avgPrice"],
         ],
         include: [
           {
             model: Order,
-            as: 'order',
+            as: "order",
             attributes: [],
             where: {
+              // ✅ No userId filter — show top sellers across all customers
               status: { [Op.in]: REVENUE_STATUSES },
               ...(dateFilter && { createdAt: dateFilter }),
             },
           },
         ],
-        group: ['menuItemId', 'itemName'],
-        order: [[fn('SUM', col('quantity')), 'DESC']],
+        group: ["menuItemId", "itemName"],
+        order: [[fn("SUM", col("quantity")), "DESC"]],
         limit,
         raw: true,
       })) as unknown as Array<{
@@ -265,7 +246,6 @@ export class DashboardService {
         avgPrice: number;
       }>;
 
-      // Type-safe mapping
       const items: TopSellingItemAggregate[] = rawItems.map((item) => ({
         menuItemId: String(item.menuItemId),
         itemName: String(item.itemName),
@@ -274,11 +254,10 @@ export class DashboardService {
         avgPrice: this.toNumber(item.avgPrice),
       }));
 
-      // Enrich with menu item details
       const enrichedItems: TopSellingItem[] = await Promise.all(
         items.map(async (item) => {
           const menuItem = await this.menuItemModel.findByPk(item.menuItemId, {
-            include: ['category'],
+            include: ["category"],
           });
 
           return {
@@ -291,39 +270,33 @@ export class DashboardService {
         }),
       );
 
-      this.logger.log(`Top ${limit} selling items retrieved for ${timeframe}`);
+      this.logger.log(`Top ${limit} selling items (${timeframe})`);
       return enrichedItems;
     } catch (error) {
-      this.logger.error('Failed to get top selling items', error);
+      this.logger.error("Failed to get top selling items", error);
       throw new InternalServerErrorException(
-        'Failed to retrieve top selling items',
+        "Failed to retrieve top selling items",
       );
     }
   }
 
-  /**
-   * Helper to get date filter based on timeframe
-   */
   private getDateFilter(
-    timeframe: 'today' | 'week' | 'month' | 'all',
+    timeframe: "today" | "week" | "month" | "all",
   ): { [Op.gte]: Date } | null {
     const now = new Date();
 
     switch (timeframe) {
-      case 'today':
+      case "today":
         return { [Op.gte]: this.getTodayStart() };
-
-      case 'week':
+      case "week":
         const weekAgo = new Date(now);
         weekAgo.setDate(now.getDate() - 7);
         return { [Op.gte]: weekAgo };
-
-      case 'month':
+      case "month":
         const monthAgo = new Date(now);
         monthAgo.setMonth(now.getMonth() - 1);
         return { [Op.gte]: monthAgo };
-
-      case 'all':
+      case "all":
       default:
         return null;
     }
@@ -332,36 +305,25 @@ export class DashboardService {
   // -------------------------------
   // RECENT ORDERS
   // -------------------------------
-  /**
-   * Get recent orders with their items
-   * @param limit - Number of orders to return (default: 10)
-   * @param status - Optional status filter
-   */
+  // ✅ userId param removed — admin sees all customer orders
   async getRecentOrders(limit = 10, status?: OrderStatus): Promise<Order[]> {
     try {
       const where: any = {};
-      if (status) {
-        where.status = status;
-      }
+      if (status) where.status = status;
 
       const orders = await this.orderModel.findAll({
         where,
-        include: [
-          {
-            model: OrderItem,
-            separate: true, // Prevents N+1 query issues
-          },
-        ],
-        order: [['createdAt', 'DESC']],
+        include: [{ model: OrderItem, separate: true }],
+        order: [["createdAt", "DESC"]],
         limit,
       });
 
       this.logger.log(`Retrieved ${orders.length} recent orders`);
       return orders;
     } catch (error) {
-      this.logger.error('Failed to get recent orders', error);
+      this.logger.error("Failed to get recent orders", error);
       throw new InternalServerErrorException(
-        'Failed to retrieve recent orders',
+        "Failed to retrieve recent orders",
       );
     }
   }
@@ -369,10 +331,7 @@ export class DashboardService {
   // -------------------------------
   // REVENUE ANALYTICS
   // -------------------------------
-  /**
-   * Get revenue breakdown by day for the last N days
-   * @param days - Number of days to include (default: 7)
-   */
+  // ✅ userId param removed — revenue across all customers
   async getRevenueByDay(days = 7): Promise<RevenueByDay[]> {
     try {
       const startDate = new Date();
@@ -385,12 +344,12 @@ export class DashboardService {
           status: { [Op.in]: REVENUE_STATUSES },
         },
         attributes: [
-          [fn('DATE', col('createdAt')), 'date'],
-          [fn('SUM', col('total')), 'revenue'],
-          [fn('COUNT', col('id')), 'orderCount'],
+          [fn("DATE", col("createdAt")), "date"],
+          [fn("SUM", col("total")), "revenue"],
+          [fn("COUNT", col("id")), "orderCount"],
         ],
-        group: [fn('DATE', col('createdAt'))],
-        order: [[fn('DATE', col('createdAt')), 'ASC']],
+        group: [fn("DATE", col("createdAt"))],
+        order: [[fn("DATE", col("createdAt")), "ASC"]],
         raw: true,
       });
 
@@ -400,9 +359,9 @@ export class DashboardService {
         orderCount: this.toNumber(order.orderCount, 0),
       }));
     } catch (error) {
-      this.logger.error('Failed to get revenue by day', error);
+      this.logger.error("Failed to get revenue by day", error);
       throw new InternalServerErrorException(
-        'Failed to retrieve revenue analytics',
+        "Failed to retrieve revenue analytics",
       );
     }
   }
@@ -410,21 +369,21 @@ export class DashboardService {
   // -------------------------------
   // ORDER STATUS BREAKDOWN
   // -------------------------------
-  /**
-   * Get count of orders by status for today
-   */
+  // ✅ userId param removed — breakdown across all customers
   async getOrderStatusBreakdown(): Promise<OrderBreakdown[]> {
     try {
       const today = this.getTodayStart();
 
       const breakdown = await this.orderModel.findAll({
-        where: { createdAt: { [Op.gte]: today } },
+        where: {
+          createdAt: { [Op.gte]: today },
+        },
         attributes: [
-          'status',
-          [fn('COUNT', col('id')), 'count'],
-          [fn('SUM', col('total')), 'totalValue'],
+          "status",
+          [fn("COUNT", col("id")), "count"],
+          [fn("SUM", col("total")), "totalValue"],
         ],
-        group: ['status'],
+        group: ["status"],
         raw: true,
       });
 
@@ -434,9 +393,9 @@ export class DashboardService {
         totalValue: Number(this.toNumber(item.totalValue).toFixed(2)),
       }));
     } catch (error) {
-      this.logger.error('Failed to get order status breakdown', error);
+      this.logger.error("Failed to get order status breakdown", error);
       throw new InternalServerErrorException(
-        'Failed to retrieve order breakdown',
+        "Failed to retrieve order breakdown",
       );
     }
   }
@@ -444,9 +403,7 @@ export class DashboardService {
   // -------------------------------
   // SYSTEM STATUS
   // -------------------------------
-  /**
-   * Get system health and activity metrics
-   */
+  // ✅ userId param removed — system-wide status for admin
   async getSystemStatus(): Promise<SystemStatus> {
     try {
       const today = this.getTodayStart();
@@ -457,10 +414,11 @@ export class DashboardService {
         }),
 
         this.menuItemModel.findOne({
-          order: [['updatedAt', 'DESC']],
-          attributes: ['updatedAt'],
+          order: [["updatedAt", "DESC"]],
+          attributes: ["updatedAt"],
         }),
 
+        // ✅ All active orders across all customers
         this.orderModel.count({
           where: {
             status: { [Op.in]: ACTIVE_STATUSES },
@@ -469,15 +427,15 @@ export class DashboardService {
       ]);
 
       return {
-        whatsappConnection: 'Active', // TODO: Implement actual WhatsApp status check
+        whatsappConnection: "Active",
         lastMenuSync: lastMenuSync?.updatedAt ?? null,
         qrScansToday,
         activeOrders,
       };
     } catch (error) {
-      this.logger.error('Failed to get system status', error);
+      this.logger.error("Failed to get system status", error);
       throw new InternalServerErrorException(
-        'Failed to retrieve system status',
+        "Failed to retrieve system status",
       );
     }
   }
@@ -485,29 +443,20 @@ export class DashboardService {
   // -------------------------------
   // LOW STOCK ALERTS
   // -------------------------------
-  /**
-   * Get menu items with low stock
-   */
   async getLowStockItems(): Promise<MenuItem[]> {
     try {
       return await this.menuItemModel.findAll({
         where: {
           trackInventory: true,
-          status: 'published',
-          [Op.and]: [
-            {
-              stockQuantity: {
-                [Op.lte]: col('lowStockAlert'),
-              },
-            },
-          ],
+          status: "published",
+          [Op.and]: [{ stockQuantity: { [Op.lte]: col("lowStockAlert") } }],
         },
-        order: [['stockQuantity', 'ASC']],
+        order: [["stockQuantity", "ASC"]],
       });
     } catch (error) {
-      this.logger.error('Failed to get low stock items', error);
+      this.logger.error("Failed to get low stock items", error);
       throw new InternalServerErrorException(
-        'Failed to retrieve low stock items',
+        "Failed to retrieve low stock items",
       );
     }
   }

@@ -7,8 +7,9 @@ import {
   IsInt,
   Min,
   IsObject,
-} from 'class-validator';
-import { Type } from 'class-transformer';
+  IsEnum,
+} from "class-validator";
+import { Type } from "class-transformer";
 
 export class CreateOrderItemDto {
   @IsUUID()
@@ -33,11 +34,16 @@ export class CreateOrderDto {
   @Type(() => CreateOrderItemDto)
   items: CreateOrderItemDto[];
 
+  // ✅ Added fulfillmentType to resolve the TS2339 error
+  @IsEnum(["delivery", "pickup"])
+  @IsOptional()
+  fulfillmentType?: "delivery" | "pickup";
+
   @IsString()
   @IsOptional()
   specialInstructions?: string;
 
   @IsOptional()
   @IsObject()
-  deliveryInfo?: Record<string, any>;  // ← accepts any delivery info shape
+  deliveryInfo?: Record<string, any>;
 }
