@@ -5,10 +5,10 @@ import {
   DataType,
   ForeignKey,
   BelongsTo,
-} from 'sequelize-typescript';
-import { Order } from './order.entity';
+} from "sequelize-typescript";
+import { Order } from "./order.entity";
 
-@Table({ tableName: 'order_items', timestamps: true })
+@Table({ tableName: "order_items", timestamps: true })
 export class OrderItem extends Model {
   @Column({
     type: DataType.UUID,

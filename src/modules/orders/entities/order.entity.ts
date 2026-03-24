@@ -6,14 +6,13 @@ import {
   HasMany,
   ForeignKey,
   BelongsTo,
-} from 'sequelize-typescript';
-import { OrderItem } from './order-item.entity';
-import { User } from '../../../users/user.model';
-import type { DeliveryInfo } from '../../../users/user.model';
-import type { OrderStatus } from '../order-status.type';
+} from "sequelize-typescript";
+import { OrderItem } from "./order-item.entity";
+import { User } from "../../../users/user.model";
+import type { DeliveryInfo } from "../../../users/user.model";
+import type { OrderStatus } from "../order-status.type";
 
-
-@Table({ tableName: 'orders', timestamps: true })
+@Table({ tableName: "orders", timestamps: true })
 export class Order extends Model {
   @Column({
     type: DataType.UUID,
@@ -39,17 +38,17 @@ export class Order extends Model {
 
   @Column({
     type: DataType.ENUM(
-      'pending_payment',
-      'paid',
-      'preparing',
-      'ready',
-      'completed',
-      'cancelled',
-      'rejected',
+      "pending_payment",
+      "paid",
+      "preparing",
+      "ready",
+      "completed",
+      "cancelled",
+      "rejected",
     ),
-    defaultValue: 'pending_payment',
+    defaultValue: "pending_payment",
   })
-  status: OrderStatus
+  status: OrderStatus;
 
   @Column({ type: DataType.DECIMAL(10, 2), allowNull: false })
   declare subtotal: number;
@@ -64,18 +63,20 @@ export class Order extends Model {
   declare specialInstructions: string;
 
   @Column({
-    type: DataType.ENUM('direct'),
-    defaultValue: 'direct',
+    type: DataType.ENUM("pick-up", "eat-in"),
+    defaultValue: "pick-up",
   })
-  declare orderSource: string;
-@Column({ type: DataType.TEXT, allowNull: true })
-declare rejectionReason: string | null;
+  declare orderType: string;
 
-@Column({ type: DataType.DATE, allowNull: true })
-declare cancelledAt: Date | null;
+  @Column({ type: DataType.TEXT, allowNull: true })
+  declare rejectionReason: string | null;
+
+  @Column({ type: DataType.DATE, allowNull: true })
+  declare cancelledAt: Date | null;
 
   @Column({ type: DataType.JSON, allowNull: true })
   declare deliveryInfoSnapshot?: DeliveryInfo;
+
   @Column({ type: DataType.DATE })
   declare completedAt: Date;
 

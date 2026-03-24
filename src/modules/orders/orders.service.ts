@@ -15,7 +15,7 @@ import { CreateOrderDto } from "./dto/create-order.dto";
 import { User } from "../../users/user.model";
 import { NotificationsService } from "../notifications/notifications.service";
 
-const DELIVERY_FEE = 500; // ₦500 — keep in sync with the frontend constant
+// const DELIVERY_FEE = 500; // ₦500 — keep in sync with the frontend constant
 
 interface OrderFilters {
   status?: string;
@@ -77,22 +77,21 @@ export class OrdersService {
 
     const tax = Number((subtotal * 0.05).toFixed(2));
 
-    // ✅ Fix 1: Calculate delivery fee based on fulfillmentType from the DTO
-    const deliveryFee = dto.fulfillmentType === "delivery" ? DELIVERY_FEE : 0;
+    // deliveryFee reserved for future delivery support — not applicable for pick-up/eat-in
+    // const deliveryFee = dto.orderType === "delivery" ? DELIVERY_FEE : 0;
 
-    const total = Number((subtotal + tax + deliveryFee).toFixed(2));
+    const total = Number((subtotal + tax).toFixed(2));
 
     const order = await this.orderModel.create({
       orderNumber,
       userId: user.id,
       customerName: user.fullName ?? "Customer",
       customerPhone: user.phone ?? "",
-      fulfillmentType: dto.fulfillmentType ?? "delivery",
-      // ✅ Fix 2: Use dto.deliveryInfo rather than user.deliveryInfo
-      deliveryInfoSnapshot: dto.deliveryInfo ?? user.deliveryInfo ?? null,
+      orderType: dto.orderType ?? "pick-up",
+      // Kept for future delivery support — will be populated when delivery is re-introduced
+      deliveryInfoSnapshot: dto.deliveryInfo ?? null,
       subtotal,
       tax,
-      deliveryFee,
       total,
       specialInstructions: dto.specialInstructions ?? null,
       status: "pending_payment",
@@ -292,7 +291,7 @@ export class OrdersService {
       },
       ready: {
         title: "Order Ready!",
-        message: `Your order ${order.orderNumber} is ready for pickup/delivery. Enjoy your meal!`,
+        message: `Your order ${order.orderNumber} is ready for pickup/eat-in. Enjoy your meal!`,
       },
       completed: {
         title: "Order Completed",

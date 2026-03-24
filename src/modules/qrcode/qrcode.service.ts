@@ -3,7 +3,13 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
-import { Injectable, NotFoundException, Logger } from "@nestjs/common";
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  Logger,
+} from "@nestjs/common";
 import { InjectModel } from "@nestjs/sequelize";
 import { Op } from "sequelize";
 import * as QRCodeLib from "qrcode";
@@ -26,8 +32,6 @@ export interface QRCodeCustomization {
   frameStyle?: "none" | "frame-1" | "frame-2" | "frame-3";
   logo?: string;
 }
-
-// ── Return type interfaces (stops TS4053) ─────────────────────────────────────
 
 export interface QRAnalyticsResult {
   qrCodeId: string;
@@ -61,8 +65,6 @@ export interface MessageResult {
   message: string;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 @Injectable()
 export class QRCodeService {
   private readonly logger = new Logger(QRCodeService.name);
@@ -91,6 +93,23 @@ export class QRCodeService {
     return { createdAt };
   }
 
+  // ✅ Reusable duplicate name check — throws ConflictException if taken,
+  //    optionally excluding a specific ID (used during updates).
+  private async assertNameUnique(
+    name: string,
+    excludeId?: string,
+  ): Promise<void> {
+    const where: Record<string, unknown> = { name };
+    if (excludeId) where.id = { [Op.ne]: excludeId };
+
+    const existing = await this.qrCodeModel.findOne({ where });
+    if (existing) {
+      throw new ConflictException(
+        `A QR code named "${name}" already exists. Please choose a different name.`,
+      );
+    }
+  }
+
   // ─── QR Image Generation ──────────────────────────────────────────────────
 
   private async generateQRImage(
@@ -110,7 +129,6 @@ export class QRCodeService {
 
     let finalBuffer: Buffer = qrBuffer;
 
-    // Logo overlay
     if (customization?.style === "logo" && customization?.logo) {
       const logoBuffer = Buffer.from(
         customization.logo.replace(/^data:image\/\w+;base64,/, ""),
@@ -122,7 +140,6 @@ export class QRCodeService {
         .toBuffer();
     }
 
-    // Frame overlay
     if (customization?.frameStyle && customization.frameStyle !== "none") {
       const framePath = `assets/frames/${customization.frameStyle}.png`;
       try {
@@ -143,9 +160,17 @@ export class QRCodeService {
   // ─── Create ───────────────────────────────────────────────────────────────
 
   async generateQRCode(data: CreateQRCodeInput): Promise<QRCode> {
+    // ✅ Validation: name is required
+    if (!data.name || data.name.trim().length === 0) {
+      throw new BadRequestException("QR code name is required.");
+    }
+
+    // ✅ Validation: duplicate name check
+    await this.assertNameUnique(data.name.trim());
+
     const qrCode = await this.qrCodeModel.create({
-      name: data.name ?? `Table ${Date.now()}`,
-      location: data.location ?? "Main Dining",
+      name: data.name.trim(),
+      location: data.location?.trim() ?? "Main Dining",
       customization: data.customization ?? {},
       url: "",
       isActive: true,
@@ -168,12 +193,31 @@ export class QRCodeService {
     location: string;
     customization?: Record<string, unknown>;
   }): Promise<QRCode[]> {
+    // ✅ Validation: tableNumbers must be a non-empty array
+    if (!Array.isArray(data.tableNumbers) || data.tableNumbers.length === 0) {
+      throw new BadRequestException("At least one table number is required.");
+    }
+
+    // ✅ Validation: no duplicate table numbers in the request itself
+    const unique = new Set(data.tableNumbers);
+    if (unique.size !== data.tableNumbers.length) {
+      throw new BadRequestException(
+        "Duplicate table numbers found in the request.",
+      );
+    }
+
+    // ✅ Validation: check ALL names upfront before creating any,
+    //    so we don't create partial sets if one name is taken.
+    for (const tableNumber of data.tableNumbers) {
+      await this.assertNameUnique(`Table ${tableNumber}`);
+    }
+
     const results: QRCode[] = [];
 
     for (const tableNumber of data.tableNumbers) {
       const qrCode = await this.qrCodeModel.create({
         name: `Table ${tableNumber}`,
-        location: data.location,
+        location: data.location?.trim() ?? "Main Dining",
         customization: data.customization ?? {},
         url: "",
         isActive: true,
@@ -195,6 +239,15 @@ export class QRCodeService {
   // ─── Update ───────────────────────────────────────────────────────────────
 
   async updateQRCode(id: string, data: UpdateQRCodeInput): Promise<QRCode> {
+    // ✅ Validation: if name is being changed, check it's not already taken
+    //    by another QR code (excludeId ensures the QR can keep its own name).
+    if (data.name !== undefined) {
+      if (data.name.trim().length === 0) {
+        throw new BadRequestException("QR code name cannot be empty.");
+      }
+      await this.assertNameUnique(data.name.trim(), id);
+    }
+
     const qrCode = await this.getQRCode(id);
 
     const updatedCustomization = data.customization
@@ -208,17 +261,23 @@ export class QRCodeService {
 
     await qrCode.update({
       ...data,
+      ...(data.name && { name: data.name.trim() }),
       customization: updatedCustomization,
       qrCodeDataUrl,
     });
+
     return qrCode;
   }
 
   // ─── Fetch ────────────────────────────────────────────────────────────────
 
   async getQRCode(id: string): Promise<QRCode> {
+    // ✅ Validation: id must be provided
+    if (!id || id.trim().length === 0) {
+      throw new BadRequestException("QR code ID is required.");
+    }
     const qr = await this.qrCodeModel.findByPk(id);
-    if (!qr) throw new NotFoundException("QR code not found");
+    if (!qr) throw new NotFoundException(`QR code with ID "${id}" not found.`);
     return qr;
   }
 
@@ -238,13 +297,23 @@ export class QRCodeService {
 
   async trackScan(qrCodeId: string, scanData: TrackScanInput): Promise<void> {
     const qrCode = await this.getQRCode(qrCodeId);
+
+    // ✅ Validation: don't track scans for inactive QR codes
+    if (!qrCode.isActive) {
+      throw new BadRequestException("This QR code is no longer active.");
+    }
+
     await qrCode.increment("totalScans");
     await this.qrScanModel.create({ qrCodeId, ...scanData });
   }
 
   async markScanAsConverted(scanId: string): Promise<MessageResult> {
+    if (!scanId || scanId.trim().length === 0) {
+      throw new BadRequestException("Scan ID is required.");
+    }
     const scan = await this.qrScanModel.findByPk(scanId);
-    if (!scan) throw new NotFoundException("Scan not found");
+    if (!scan)
+      throw new NotFoundException(`Scan with ID "${scanId}" not found.`);
     await (scan as any).update({ converted: true });
     return { message: "Scan marked as converted" };
   }
@@ -256,6 +325,11 @@ export class QRCodeService {
     startDate?: Date,
     endDate?: Date,
   ): Promise<QRAnalyticsResult> {
+    // ✅ Validation: date range sanity check
+    if (startDate && endDate && startDate > endDate) {
+      throw new BadRequestException("startDate must be before endDate.");
+    }
+
     const qrCode = await this.getQRCode(id);
     const dateWhere = this.buildDateWhere(startDate, endDate);
 
@@ -270,21 +344,18 @@ export class QRCodeService {
         ? Math.round((conversions / scans.length) * 100 * 10) / 10
         : 0;
 
-    // Scans grouped by calendar date
     const scansByDay: Record<string, number> = {};
     scans.forEach((s) => {
       const day = new Date(s.createdAt).toISOString().split("T")[0];
       scansByDay[day] = (scansByDay[day] ?? 0) + 1;
     });
 
-    // Scans grouped by hour-of-day
     const scansByHour: Record<number, number> = {};
     scans.forEach((s) => {
       const hour = new Date(s.createdAt).getHours();
       scansByHour[hour] = (scansByHour[hour] ?? 0) + 1;
     });
 
-    // Device breakdown
     const deviceBreakdown: Record<string, number> = {};
     scans.forEach((s) => {
       const device = (s as any).deviceType ?? "unknown";
@@ -310,6 +381,10 @@ export class QRCodeService {
     startDate?: Date,
     endDate?: Date,
   ): Promise<OverallAnalyticsResult> {
+    if (startDate && endDate && startDate > endDate) {
+      throw new BadRequestException("startDate must be before endDate.");
+    }
+
     const dateWhere = this.buildDateWhere(startDate, endDate);
     const scans = await this.qrScanModel.findAll({ where: { ...dateWhere } });
 
@@ -338,6 +413,13 @@ export class QRCodeService {
   // ─── Compare QR Performance ───────────────────────────────────────────────
 
   async compareQRPerformance(qrCodeIds: string[]): Promise<CompareResult[]> {
+    // ✅ Validation: at least 2 QR codes needed for a meaningful comparison
+    if (!Array.isArray(qrCodeIds) || qrCodeIds.length < 2) {
+      throw new BadRequestException(
+        "At least 2 QR code IDs are required for comparison.",
+      );
+    }
+
     const results: CompareResult[] = [];
 
     for (const id of qrCodeIds) {
@@ -359,18 +441,24 @@ export class QRCodeService {
       });
     }
 
-    // Sort by totalScans descending
     return results.sort((a, b) => b.totalScans - a.totalScans);
   }
 
   // ─── PDF Download ─────────────────────────────────────────────────────────
-  // Returns the raw base64 QR image as a simple downloadable buffer.
-  // Replace with a real PDF library (pdf-lib / puppeteer) when needed.
 
-  // Install if not already present: npm install sharp
-  // sharp is already in your dependencies from QR image generation
+  private escapeXml(str: string): string {
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;");
+  }
 
-  // Helper: collect a Node stream into a Buffer
+  // ✅ Fix: start collecting the stream BEFORE calling doc.end().
+  //    The original code called doc.end() first, then passed the stream to
+  //    streamToBuffer — on a fast/synchronous flush, 'data' and 'end' events
+  //    fire before listeners are attached, producing an empty/corrupt buffer.
   private streamToBuffer(stream: Readable): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];
@@ -388,6 +476,14 @@ export class QRCodeService {
     name?: string,
     location?: string,
   ): Promise<Buffer> {
+    // ✅ Validation: size must be a recognised value
+    const validSizes: PDFSize[] = ["small", "medium", "large"];
+    if (!validSizes.includes(size)) {
+      throw new BadRequestException(
+        `Invalid size "${size}". Valid options: ${validSizes.join(", ")}.`,
+      );
+    }
+
     const qrCode = await this.getQRCode(id);
 
     if (!qrCode.qrCodeDataUrl) {
@@ -396,30 +492,26 @@ export class QRCodeService {
       );
     }
 
-    // ── Page dimensions ───────────────────────────────────────────────────
     const SIZE_MAP: Record<PDFSize, { width: number; height: number }> = {
-      small: { width: 283, height: 340 }, // ~100mm × 120mm (table tent)
-      medium: { width: 595, height: 842 }, // A4
-      large: { width: 842, height: 1191 }, // A3
+      small: { width: 283, height: 340 },
+      medium: { width: 595, height: 842 },
+      large: { width: 842, height: 1191 },
     };
 
-    const { width, height } = SIZE_MAP[size] ?? SIZE_MAP.medium;
+    const { width, height } = SIZE_MAP[size];
 
-    // ── Decode base64 QR image ────────────────────────────────────────────
     const base64Data = qrCode.qrCodeDataUrl.replace(
       /^data:image\/\w+;base64,/,
       "",
     );
     const qrBuffer = Buffer.from(base64Data, "base64");
 
-    // ── Resize QR to 70% of page width ───────────────────────────────────
     const qrSize = Math.round(width * 0.7);
     const resizedQR = await sharp(qrBuffer)
       .resize(qrSize, qrSize)
       .png()
       .toBuffer();
 
-    // ── Build PDF ─────────────────────────────────────────────────────────
     const doc = new PDFDocument({
       size: [width, height],
       margins: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -429,13 +521,16 @@ export class QRCodeService {
       },
     });
 
+    // ✅ Fix: register listeners on the stream BEFORE calling doc.end()
+    //    so no data events are missed. Previously doc.end() was called first,
+    //    which caused the buffer to be empty/corrupt on fast machines.
+    const bufferPromise = this.streamToBuffer(doc as unknown as Readable);
+
     const xCenter = width / 2;
     const qrX = (width - qrSize) / 2;
 
-    // White background
     doc.rect(0, 0, width, height).fill("#ffffff");
 
-    // "SCAN TO ORDER" label — top
     const topLabelY = size === "small" ? 22 : 40;
     doc
       .font("Helvetica-Bold")
@@ -447,21 +542,18 @@ export class QRCodeService {
         characterSpacing: 2,
       });
 
-    // QR image — centred vertically with room for labels
     const labelSpace = name || location ? (size === "small" ? 55 : 80) : 20;
     const qrY = (height - qrSize - labelSpace) / 2;
 
     doc.image(resizedQR, qrX, qrY, { width: qrSize, height: qrSize });
 
-    // Decorative border around QR
     doc
       .rect(qrX - 4, qrY - 4, qrSize + 8, qrSize + 8)
       .lineWidth(0.5)
       .strokeColor("#F1E4DE")
       .stroke();
 
-    // Name
-    const displayName = name || qrCode.name;
+    const displayName = name ?? qrCode.name;
     if (displayName) {
       doc
         .font("Helvetica-Bold")
@@ -473,8 +565,7 @@ export class QRCodeService {
         });
     }
 
-    // Location
-    const displayLocation = location || qrCode.location;
+    const displayLocation = location ?? qrCode.location;
     if (displayLocation) {
       doc
         .font("Helvetica")
@@ -486,7 +577,6 @@ export class QRCodeService {
         });
     }
 
-    // Subtle footer
     doc
       .font("Helvetica")
       .fontSize(size === "small" ? 6 : 8)
@@ -501,19 +591,10 @@ export class QRCodeService {
         },
       );
 
+    // ✅ doc.end() called AFTER listeners are set up
     doc.end();
 
-    return this.streamToBuffer(doc as unknown as Readable);
-  }
-
-  // ── XML escape helper ──────────────────────────────────────────────────────
-  private escapeXml(str: string): string {
-    return str
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&apos;");
+    return bufferPromise;
   }
 
   // ─── Bulk PDF ─────────────────────────────────────────────────────────────
@@ -523,8 +604,11 @@ export class QRCodeService {
     _size: PDFSize = "medium",
     _template: PDFTemplate = "modern",
   ): Promise<Buffer> {
-    // Concatenates raw PNG buffers as a placeholder.
-    // Swap for pdf-lib multi-page PDF when you add the dependency.
+    // ✅ Validation: at least one ID required
+    if (!Array.isArray(qrCodeIds) || qrCodeIds.length === 0) {
+      throw new BadRequestException("At least one QR code ID is required.");
+    }
+
     const buffers: Buffer[] = [];
 
     for (const id of qrCodeIds) {
@@ -536,6 +620,12 @@ export class QRCodeService {
         );
         buffers.push(buf);
       }
+    }
+
+    if (buffers.length === 0) {
+      throw new NotFoundException(
+        "None of the provided QR codes have generated images yet.",
+      );
     }
 
     return Buffer.concat(buffers);
