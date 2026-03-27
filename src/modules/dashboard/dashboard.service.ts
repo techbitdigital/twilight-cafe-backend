@@ -260,16 +260,29 @@ export class DashboardService {
             include: ["category"],
           });
 
+          let image: string | null = null;
+          const raw = menuItem?.images;
+
+          if (typeof raw === "string") {
+            try {
+              const parsed = JSON.parse(raw);
+              image = Array.isArray(parsed) ? parsed[0] : parsed;
+            } catch {
+              image = raw;
+            }
+          } else if (Array.isArray(raw)) {
+            image = raw[0];
+          }
+
           return {
             ...item,
             totalRevenue: Number(item.totalRevenue.toFixed(2)),
             avgPrice: Number(item.avgPrice.toFixed(2)),
-            image: menuItem?.images?.[0] ?? null,
+            image,
             category: menuItem?.category?.name,
           };
         }),
       );
-
       this.logger.log(`Top ${limit} selling items (${timeframe})`);
       return enrichedItems;
     } catch (error) {
