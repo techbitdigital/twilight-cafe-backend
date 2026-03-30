@@ -15,11 +15,12 @@ import {
 import { FilesInterceptor } from "@nestjs/platform-express";
 import { MenuService } from "./menu.service";
 import { CreateMenuItemDto } from "./dto/create-menu-item.dto";
-import { UpdateMenuItemDto } from "./dto/update-menu-item.dto"; // ← new import
+import { UpdateMenuItemDto } from "./dto/update-menu-item.dto";
 import { FormDataJsonInterceptor } from "./interceptors/form-data-json.interceptor";
 import { diskStorage } from "multer";
 import { extname } from "path";
 import { v4 as uuidv4 } from "uuid";
+import { Express } from "express"; // ✅ correct import for Express.Multer.File
 
 import { JwtAuthGuard } from "../../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../../auth/guards/roles.guard";
@@ -117,7 +118,7 @@ export class MenuController {
   )
   async createMenuItem(
     @Body() createMenuItemDto: CreateMenuItemDto,
-    @UploadedFiles() files: Express.Multer.File[],
+    @UploadedFiles() files: Express.Multer.File[], // ✅ correct type
   ) {
     const images = files
       ? files.map((file) => `/uploads/menu-items/${file.filename}`)
@@ -149,8 +150,8 @@ export class MenuController {
   )
   async updateMenuItem(
     @Param("id") id: string,
-    @Body() updateData: UpdateMenuItemDto, // ← was Partial<CreateMenuItemDto>
-    @UploadedFiles() files: Express.Multer.File[],
+    @Body() updateData: UpdateMenuItemDto,
+    @UploadedFiles() files: Express.Multer.File[], // ✅ correct type
   ) {
     const images =
       files && files.length > 0
