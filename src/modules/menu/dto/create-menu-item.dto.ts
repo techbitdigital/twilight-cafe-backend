@@ -29,6 +29,21 @@ function parseJsonArray(value: unknown) {
   return value;
 }
 
+/**
+ * ✅ FIXED BOOLEAN PARSER
+ */
+function toBoolean(value: unknown): boolean | undefined {
+  if (value === undefined || value === null) return undefined;
+
+  if (typeof value === "boolean") return value;
+
+  if (typeof value === "string") {
+    return value.toLowerCase() === "true";
+  }
+
+  return Boolean(value);
+}
+
 export class VariationDto {
   @IsString()
   name: string;
@@ -37,9 +52,7 @@ export class VariationDto {
   @IsNumber()
   priceAdjustment: number;
 
-  @Transform(
-    ({ value }: { value: unknown }) => value === "true" || value === true,
-  )
+  @Transform(({ value }) => toBoolean(value))
   @IsBoolean()
   isAvailable: boolean;
 }
@@ -52,9 +65,7 @@ export class AddonDto {
   @IsNumber()
   price: number;
 
-  @Transform(
-    ({ value }: { value: unknown }) => value === "true" || value === true,
-  )
+  @Transform(({ value }) => toBoolean(value))
   @IsBoolean()
   isAvailable: boolean;
 }
@@ -79,9 +90,7 @@ export class CreateMenuItemDto {
   @IsNumber()
   salePrice?: number;
 
-  @Transform(
-    ({ value }: { value: unknown }) => value === "true" || value === true,
-  )
+  @Transform(({ value }) => toBoolean(value))
   @IsBoolean()
   isAvailableForOrdering: boolean;
 
@@ -93,9 +102,7 @@ export class CreateMenuItemDto {
   @IsEnum(["draft", "published"])
   status: string;
 
-  @Transform(
-    ({ value }: { value: unknown }) => value === "true" || value === true,
-  )
+  @Transform(({ value }) => toBoolean(value))
   @IsBoolean()
   trackInventory: boolean;
 
@@ -109,9 +116,6 @@ export class CreateMenuItemDto {
   @IsNumber()
   lowStockAlert?: number;
 
-  /**
-   * Variations
-   */
   @IsOptional()
   @Transform(({ value }) => parseJsonArray(value))
   @IsArray()
@@ -119,9 +123,6 @@ export class CreateMenuItemDto {
   @Type(() => VariationDto)
   variations?: VariationDto[];
 
-  /**
-   * Addons
-   */
   @IsOptional()
   @Transform(({ value }) => parseJsonArray(value))
   @IsArray()
@@ -129,9 +130,6 @@ export class CreateMenuItemDto {
   @Type(() => AddonDto)
   addons?: AddonDto[];
 
-  /**
-   * Tags
-   */
   @IsOptional()
   @Transform(({ value }) => parseJsonArray(value))
   @IsArray()

@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
   Injectable,
@@ -273,109 +276,72 @@ export class MenuService {
     });
   }
 
-  async updateMenuItem(
-    id: string,
-    updateData: Partial<CreateMenuItemDto>,
-    images?: string[],
-  ) {
+  async updateMenuItem(id: string, updateData: any, images?: string[]) {
     const menuItem = await this.menuItemModel.findByPk(id);
     if (!menuItem) {
       throw new NotFoundException("Menu item not found");
     }
 
-    // Check for duplicate name only when name is actually being changed
-    if (updateData.name && updateData.name.trim() !== menuItem.name) {
-      const existingItem = await this.menuItemModel.findOne({
-        where: {
-          name: updateData.name.trim(),
-          id: { [Op.ne]: id },
-        },
-      });
-      if (existingItem) {
-        throw new ConflictException(
-          `Menu item with name "${updateData.name}" already exists`,
-        );
-      }
-    }
-
-    // ✅ Only spread fields that are actually defined in the incoming payload.
-    // Previously every field was included unconditionally, so undefined values
-    // were being written as NULL to the DB, wiping existing data.
-    const updatePayload: Partial<MenuItem> = {};
+    const updatePayload: any = {};
 
     if (updateData.name !== undefined)
       updatePayload.name = updateData.name.trim();
+
     if (updateData.description !== undefined)
       updatePayload.description = updateData.description;
+
     if (updateData.categoryId !== undefined)
       updatePayload.categoryId = updateData.categoryId;
+
     if (updateData.regularPrice !== undefined)
       updatePayload.regularPrice = updateData.regularPrice;
+
     if (updateData.salePrice !== undefined)
       updatePayload.salePrice = updateData.salePrice;
-    if (updateData.isAvailableForOrdering !== undefined)
+
+    if (typeof updateData.isAvailableForOrdering === "boolean") {
       updatePayload.isAvailableForOrdering = updateData.isAvailableForOrdering;
+    }
+
     if (updateData.preparationTime !== undefined)
       updatePayload.preparationTime = updateData.preparationTime;
+
     if (updateData.status !== undefined)
       updatePayload.status = updateData.status;
-    if (updateData.trackInventory !== undefined)
+
+    if (typeof updateData.trackInventory === "boolean") {
       updatePayload.trackInventory = updateData.trackInventory;
+    }
+
     if (updateData.stockQuantity !== undefined)
       updatePayload.stockQuantity = updateData.stockQuantity;
+
     if (updateData.lowStockAlert !== undefined)
       updatePayload.lowStockAlert = updateData.lowStockAlert;
+
     if (updateData.tags !== undefined) updatePayload.tags = updateData.tags;
 
-    // Only overwrite images if new ones were uploaded
     if (images?.length) {
       updatePayload.images = images;
     }
 
-    try {
-      await menuItem.update(updatePayload);
+    await menuItem.update(updatePayload);
 
-      // Variations — only touch if explicitly sent in the request
-      if (updateData.variations !== undefined) {
-        await this.variationModel.destroy({ where: { menuItemId: id } });
+    return this.getMenuItem(id);
+  }
 
-        if (updateData.variations.length > 0) {
-          const variations = updateData.variations.map((variation, index) => ({
-            ...variation,
-            menuItemId: id,
-            sortOrder: index,
-          }));
-          await this.variationModel.bulkCreate(variations);
-        }
-      }
+  async toggleMenuItemAvailability(id: string) {
+    const menuItem = await this.menuItemModel.findByPk(id);
 
-      // Addons — only touch if explicitly sent in the request
-      if (updateData.addons !== undefined) {
-        await this.addonModel.destroy({ where: { menuItemId: id } });
-
-        if (updateData.addons.length > 0) {
-          const addons = updateData.addons.map((addon, index) => ({
-            ...addon,
-            menuItemId: id,
-            sortOrder: index,
-          }));
-          await this.addonModel.bulkCreate(addons);
-        }
-      }
-
-      return this.getMenuItem(id);
-    } catch (error) {
-      // Re-throw NestJS HTTP exceptions untouched
-      if (error?.status) throw error;
-
-      if (error.name === "SequelizeUniqueConstraintError") {
-        throw new ConflictException(
-          `Menu item with name "${updateData.name}" already exists`,
-        );
-      }
-
-      throw new BadRequestException("Failed to update menu item");
+    if (!menuItem) {
+      throw new NotFoundException("Menu item not found");
     }
+
+    await menuItem.update({
+      isAvailableForOrdering: !menuItem.isAvailableForOrdering,
+    });
+
+    return menuItem;
   }
 
   async deleteMenuItem(id: string) {

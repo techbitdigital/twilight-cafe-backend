@@ -25,7 +25,6 @@ import { JwtAuthGuard } from "../../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../../auth/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { Role } from "../../common/enums/role.enum";
-import { Express } from "express";
 
 @Controller("api/menu")
 export class MenuController {
@@ -183,5 +182,12 @@ export class MenuController {
   @Get("items/low-stock/alert")
   async checkLowStock() {
     return this.menuService.checkLowStock();
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @Put("items/:id/toggle-availability")
+  async toggleAvailability(@Param("id") id: string) {
+    return this.menuService.toggleMenuItemAvailability(id);
   }
 }

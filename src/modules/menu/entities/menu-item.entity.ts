@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   Table,
   Column,
@@ -36,10 +38,23 @@ export class MenuItem extends Model {
   @BelongsTo(() => Category)
   declare category: Category;
 
-  @Column({ type: DataType.DECIMAL(10, 2), allowNull: false })
+  @Column({
+    type: DataType.DECIMAL(10, 2),
+    allowNull: false,
+    get() {
+      const value = this.getDataValue("regularPrice");
+      return value ? parseFloat(value) : null;
+    },
+  })
   declare regularPrice: number;
 
-  @Column({ type: DataType.DECIMAL(10, 2) })
+  @Column({
+    type: DataType.DECIMAL(10, 2),
+    get() {
+      const value = this.getDataValue("salePrice");
+      return value ? parseFloat(value) : null;
+    },
+  })
   declare salePrice: number;
 
   @Column({ type: DataType.BOOLEAN, defaultValue: true })
