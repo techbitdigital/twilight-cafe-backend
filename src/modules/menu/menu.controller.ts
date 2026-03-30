@@ -15,17 +15,18 @@ import {
 import { FilesInterceptor } from "@nestjs/platform-express";
 import { MenuService } from "./menu.service";
 import { CreateMenuItemDto } from "./dto/create-menu-item.dto";
+import { UpdateMenuItemDto } from "./dto/update-menu-item.dto"; // ← new import
 import { FormDataJsonInterceptor } from "./interceptors/form-data-json.interceptor";
 import { diskStorage } from "multer";
 import { extname } from "path";
 import { v4 as uuidv4 } from "uuid";
 
-// Auth & RBAC
 import { JwtAuthGuard } from "../../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../../auth/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { Role } from "../../common/enums/role.enum";
 import { Express } from "express";
+
 @Controller("api/menu")
 export class MenuController {
   constructor(private readonly menuService: MenuService) {}
@@ -58,7 +59,6 @@ export class MenuController {
   // ADMIN ONLY ENDPOINTS
   // =========================
 
-  // Categories
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @Post("categories")
@@ -94,13 +94,11 @@ export class MenuController {
     return this.menuService.deleteCategory(id);
   }
 
-  // Menu Items
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @Post("items")
   @UseInterceptors(
     FilesInterceptor("images", 5, {
-      // 👈 multer FIRST — parses multipart body
       storage: diskStorage({
         destination: "./uploads/menu-items",
         filename: (req, file, cb) => {
@@ -116,7 +114,7 @@ export class MenuController {
       },
       limits: { fileSize: 5 * 1024 * 1024 },
     }),
-    new FormDataJsonInterceptor(), // 👈 THEN parse JSON string fields
+    new FormDataJsonInterceptor(),
   )
   async createMenuItem(
     @Body() createMenuItemDto: CreateMenuItemDto,
@@ -125,7 +123,6 @@ export class MenuController {
     const images = files
       ? files.map((file) => `/uploads/menu-items/${file.filename}`)
       : [];
-
     return this.menuService.createMenuItem(createMenuItemDto, images);
   }
 
@@ -134,7 +131,6 @@ export class MenuController {
   @Put("items/:id")
   @UseInterceptors(
     FilesInterceptor("images", 5, {
-      // 👈 multer FIRST — parses multipart body
       storage: diskStorage({
         destination: "./uploads/menu-items",
         filename: (req, file, cb) => {
@@ -150,11 +146,11 @@ export class MenuController {
       },
       limits: { fileSize: 5 * 1024 * 1024 },
     }),
-    new FormDataJsonInterceptor(), // 👈 THEN parse JSON string fields
+    new FormDataJsonInterceptor(),
   )
   async updateMenuItem(
     @Param("id") id: string,
-    @Body() updateData: Partial<CreateMenuItemDto>,
+    @Body() updateData: UpdateMenuItemDto, // ← was Partial<CreateMenuItemDto>
     @UploadedFiles() files: Express.Multer.File[],
   ) {
     const images =
