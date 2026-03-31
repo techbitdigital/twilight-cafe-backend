@@ -20,6 +20,7 @@ import { FormDataJsonInterceptor } from "./interceptors/form-data-json.intercept
 import { diskStorage } from "multer";
 import { extname } from "path";
 import { v4 as uuidv4 } from "uuid";
+import type { Express } from "express";
 
 import { JwtAuthGuard } from "../../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../../auth/guards/roles.guard";
