@@ -11,11 +11,11 @@ import { Op, WhereOptions } from "sequelize";
 import { Order } from "./entities/order.entity";
 import { OrderItem } from "./entities/order-item.entity";
 import { MenuItem } from "../menu/entities/menu-item.entity";
+import { Variation } from "../menu/entities/variation.entity";
+import { Addon } from "../menu/entities/addon.entity";
 import { CreateOrderDto } from "./dto/create-order.dto";
 import { User } from "../../users/user.model";
 import { NotificationsService } from "../notifications/notifications.service";
-
-// const DELIVERY_FEE = 500; // ₦500 — keep in sync with the frontend constant
 
 interface OrderFilters {
   status?: string;
@@ -32,6 +32,11 @@ export class OrdersService {
     @InjectModel(Order) private readonly orderModel: typeof Order,
     @InjectModel(OrderItem) private readonly orderItemModel: typeof OrderItem,
     @InjectModel(MenuItem) private readonly menuItemModel: typeof MenuItem,
+    // ✅ Inject variation and addon models so we can look them up
+    @InjectModel(Variation)
+    private readonly variationModel: typeof Variation,
+    @InjectModel(Addon)
+    private readonly addonModel: typeof Addon,
     private readonly notificationsService: NotificationsService,
   ) {}
 
@@ -53,42 +58,112 @@ export class OrdersService {
       throw new BadRequestException("One or more items are unavailable");
     }
 
-    let subtotal = 0;
+    // ✅ STEP 1: Resolve all items FIRST
+    const resolvedOrderItems = await Promise.all(
+      dto.items.map(async (item) => {
+        const menuItem = menuItems.find((m) => m.id === item.menuItemId);
 
-    const orderItemsData = dto.items.map((item) => {
-      const menuItem = menuItems.find((m) => m.id === item.menuItemId)!;
+        if (!menuItem) {
+          throw new BadRequestException("Menu item not found");
+        }
 
-      if (menuItem.trackInventory && menuItem.stockQuantity < item.quantity) {
-        throw new BadRequestException(`${menuItem.name} is out of stock`);
-      }
+        if (menuItem.trackInventory && menuItem.stockQuantity < item.quantity) {
+          throw new BadRequestException(`${menuItem.name} is out of stock`);
+        }
 
-      const price = Number(menuItem.salePrice ?? menuItem.regularPrice);
-      subtotal += price * item.quantity;
+        let unitPrice = Number(menuItem.salePrice ?? menuItem.regularPrice);
 
-      return {
-        menuItemId: menuItem.id,
-        itemName: menuItem.name,
-        price,
-        quantity: item.quantity,
-        selectedAddons: [],
-        selectedVariation: null,
-      };
-    });
+        // ─── Variation ─────────────────────────
+        let selectedVariation: {
+          id: string;
+          name: string;
+          priceAdjustment: string;
+        } | null = null;
+
+        if (item.variationId) {
+          const variation = await this.variationModel.findOne({
+            where: {
+              id: item.variationId,
+              menuItemId: menuItem.id,
+              isAvailable: true,
+            },
+          });
+
+          if (!variation) {
+            throw new BadRequestException(
+              `Variation not found for item ${menuItem.name}`,
+            );
+          }
+
+          unitPrice += Number(variation.priceAdjustment);
+
+          selectedVariation = {
+            id: variation.id,
+            name: variation.name,
+            priceAdjustment: String(variation.priceAdjustment),
+          };
+        }
+
+        // ─── Addons ─────────────────────────
+        const selectedAddons: {
+          id: string;
+          name: string;
+          price: string;
+        }[] = [];
+
+        if (item.addonIds?.length) {
+          for (const addonId of item.addonIds) {
+            const addon = await this.addonModel.findOne({
+              where: {
+                id: addonId,
+                menuItemId: menuItem.id,
+                isAvailable: true,
+              },
+            });
+
+            if (!addon) {
+              throw new BadRequestException(
+                `Addon not found for item ${menuItem.name}`,
+              );
+            }
+
+            unitPrice += Number(addon.price);
+
+            selectedAddons.push({
+              id: addon.id,
+              name: addon.name,
+              price: String(addon.price),
+            });
+          }
+        }
+
+        return {
+          menuItemId: menuItem.id,
+          itemName: menuItem.name,
+          price: unitPrice, // ✅ FULL price per unit
+          quantity: item.quantity,
+          selectedVariation,
+          selectedAddons,
+        };
+      }),
+    );
+
+    // ✅ STEP 2: Calculate subtotal AFTER resolving
+    const subtotal = resolvedOrderItems.reduce(
+      (sum, item) => sum + item.price * item.quantity,
+      0,
+    );
 
     const tax = Number((subtotal * 0.05).toFixed(2));
-
-    // deliveryFee reserved for future delivery support — not applicable for pick-up/eat-in
-    // const deliveryFee = dto.orderType === "delivery" ? DELIVERY_FEE : 0;
-
     const total = Number((subtotal + tax).toFixed(2));
 
+    // ✅ STEP 3: Save order
     const order = await this.orderModel.create({
       orderNumber,
       userId: user.id,
       customerName: user.fullName ?? "Customer",
       customerPhone: user.phone ?? "",
       orderType: dto.orderType ?? "pick-up",
-      // Kept for future delivery support — will be populated when delivery is re-introduced
       deliveryInfoSnapshot: dto.deliveryInfo ?? null,
       subtotal,
       tax,
@@ -97,8 +172,12 @@ export class OrdersService {
       status: "pending_payment",
     });
 
+    // ✅ STEP 4: Save order items
     await this.orderItemModel.bulkCreate(
-      orderItemsData.map((item) => ({ ...item, orderId: order.id })),
+      resolvedOrderItems.map((item) => ({
+        ...item,
+        orderId: order.id,
+      })),
     );
 
     await this.notificationsService.create(
@@ -133,9 +212,7 @@ export class OrdersService {
       include: [OrderItem],
     });
 
-    if (!order) {
-      throw new NotFoundException("Order not found");
-    }
+    if (!order) throw new NotFoundException("Order not found");
 
     if (user.role === "customer" && order.userId !== user.id) {
       throw new NotFoundException("Order not found");
@@ -190,7 +267,6 @@ export class OrdersService {
     }
 
     await order.update({
-      // ✅ Fix 3: Use "rejected" not "cancelled"
       status: "rejected",
       rejectionReason: reason ?? null,
       cancelledAt: new Date(),
@@ -276,7 +352,6 @@ export class OrdersService {
       completedAt: status === "completed" ? new Date() : order.completedAt,
     });
 
-    // ✅ FIXED: Corrected the Record syntax and structure
     const statusNotifications: Record<
       string,
       { title: string; message: string }
@@ -325,7 +400,6 @@ export class OrdersService {
   /* ============================
       ORDER STATS
   ============================ */
-  // ✅ Fix 4: Added optional `period` param and fixed the "new" status query.
   async getOrderStats(period: "today" | "week" | "month" = "today") {
     const now = new Date();
     let since: Date;

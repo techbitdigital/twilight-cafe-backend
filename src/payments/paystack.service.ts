@@ -19,7 +19,11 @@ export class PaystackService {
 
       return response.data;
     } catch (error) {
-      throw new BadRequestException("Payment verification failed");
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      throw new BadRequestException(
+        "Payment verification failed:" + errorMessage,
+      );
     }
   }
 }
